@@ -319,6 +319,12 @@ extension DownloadManager: URLSessionDownloadDelegate {
     nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
         MainActor.assumeIsolated {
             guard let item = item(for: downloadTask) else { return }
+
+            // Update filename if we got it from the response headers
+            if item.suggestedFileName == nil, let suggested = downloadTask.response?.suggestedFilename {
+                item.suggestedFileName = suggested
+            }
+
             let speedUpdated = item.updateSpeed(bytesWritten: totalBytesWritten, totalBytesExpected: totalBytesExpectedToWrite)
             item.progress = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
 
