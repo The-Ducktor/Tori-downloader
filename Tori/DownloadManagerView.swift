@@ -265,6 +265,33 @@ struct AddDownloadView: View {
                         Text("\(results.count) files discovered. Choose which ones to download.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
+
+                        // Show plugin info if available
+                        if let pluginName = results.first?.pluginName {
+                            HStack(spacing: 6) {
+                                Image(systemName: "puzzlepiece.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.accentColor)
+                                Text("Via: \(pluginName)")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+
+                                if let capabilities = results.first?.pluginCapabilities, !capabilities.isEmpty {
+                                    HStack(spacing: 4) {
+                                        ForEach(capabilities, id: \.self) { capability in
+                                            Text(capability)
+                                                .font(.system(size: 9, weight: .medium))
+                                                .padding(.horizontal, 5)
+                                                .padding(.vertical, 2)
+                                                .background(Color.accentColor.opacity(0.1))
+                                                .foregroundColor(.accentColor)
+                                                .clipShape(Capsule())
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.top, 4)
+                        }
                     }
                     Spacer()
                     HStack(spacing: 12) {
@@ -731,7 +758,7 @@ struct PluginsListView: View {
                             .padding(.top, 2)
 
                         VStack(alignment: .leading, spacing: 4) {
-                            HStack {
+                            HStack(spacing: 8) {
                                 Text(plugin.manifest.name)
                                     .font(.headline)
                                     .foregroundColor(plugin.isEnabled ? .primary : .secondary)
@@ -746,6 +773,22 @@ struct PluginsListView: View {
                                         .clipShape(Capsule())
                                 }
                                 .buttonStyle(.plain)
+
+                                // Show capabilities next to button
+                                if let capabilities = plugin.manifest.capabilities, !capabilities.isEmpty {
+                                    HStack(spacing: 4) {
+                                        ForEach(capabilities, id: \.self) { capability in
+                                            Text(capability)
+                                                .font(.system(size: 8, weight: .semibold))
+                                                .padding(.horizontal, 5)
+                                                .padding(.vertical, 1)
+                                                .background(Color.accentColor.opacity(0.15))
+                                                .foregroundColor(.accentColor)
+                                                .opacity(plugin.isEnabled ? 1.0 : 0.6)
+                                                .clipShape(Capsule())
+                                        }
+                                    }
+                                }
                             }
 
                             if let description = plugin.manifest.description {
