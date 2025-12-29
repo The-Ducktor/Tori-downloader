@@ -15,6 +15,7 @@ let isConnecting = false;
 const scriptStartTime = Date.now();
 let socketConnectionTime = null;
 let trackedDownloadIds = new Set(); // Track which downloads we've seen
+let periodicCheckTimer = null;
 
 console.log("[Tori] Background script initialized");
 
@@ -77,6 +78,11 @@ function connectWebSocket() {
 			clearTimeout(reconnectTimer);
 			reconnectTimer = null;
 		}
+		// Clear periodic check timer when connected
+		if (periodicCheckTimer) {
+			clearInterval(periodicCheckTimer);
+			periodicCheckTimer = null;
+		}
 	};
 
 	socket.onmessage = (event) => {
@@ -131,6 +137,14 @@ function connectWebSocket() {
 
 		if (!reconnectTimer) {
 			reconnectTimer = setTimeout(connectWebSocket, 5000);
+		}
+
+		// Start periodic check if not already running
+		if (!periodicCheckTimer) {
+			periodicCheckTimer = setInterval(() => {
+				console.log("[Tori] Periodic connection check (offline)");
+				connectWebSocket();
+			}, 10000);
 		}
 	};
 
