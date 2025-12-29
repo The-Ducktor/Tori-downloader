@@ -7,6 +7,14 @@ struct PluginManifest: Codable, Sendable {
     let entryPoint: String
     let patterns: [String]
     let capabilities: [String]?
+    let reprocessOnResume: Bool?
+}
+
+/// PluginContext encapsulates metadata about a plugin for extensibility
+struct PluginContext: Sendable {
+    let name: String
+    let capabilities: [String]?
+    let reprocessOnResume: Bool?
 }
 
 struct PluginActionResult: Sendable {
@@ -15,8 +23,7 @@ struct PluginActionResult: Sendable {
     let iconURL: String?
     let size: Int64?
     let headers: [String: String]?
-    let pluginName: String?
-    let pluginCapabilities: [String]?
+    let context: PluginContext?
 }
 
 struct LoadedPlugin: Identifiable {
@@ -232,7 +239,7 @@ class PluginManager: ObservableObject {
     /// Processes a URL through a plugin asynchronously with retry logic
     func processURL(_ url: URL) async -> [PluginActionResult] {
         guard let plugin = findPlugin(for: url) else {
-            return [PluginActionResult(url: url, fileName: nil, iconURL: nil, size: nil, headers: nil, pluginName: nil, pluginCapabilities: nil)]
+            return [PluginActionResult(url: url, fileName: nil, iconURL: nil, size: nil, headers: nil, context: nil)]
         }
 
         let maxRetries = 3
@@ -293,14 +300,14 @@ class PluginManager: ObservableObject {
                     let length = result.objectForKeyedSubscript("length")?.toInt32() ?? 0
                     for i in 0..<length {
                         if let item = result.objectAtIndexedSubscript(Int(i)),
-                           let actionResult = parsePluginResult(item, pluginName: plugin.manifest.name, pluginCapabilities: plugin.manifest.capabilities) {
+                           let actionResult = parsePluginResult(item, context: createContext(from: plugin)) {
                             results.append(actionResult)
                         }
                     }
                     if !results.isEmpty { return results }
                 } else if result.isObject {
                     if result.hasProperty("url") {
-                        if let actionResult = parsePluginResult(result, pluginName: plugin.manifest.name, pluginCapabilities: plugin.manifest.capabilities) {
+                        if let actionResult = parsePluginResult(result, context: createContext(from: plugin)) {
                             return [actionResult]
                         }
                     } else if result.hasProperty("files") {
@@ -310,7 +317,7 @@ class PluginManager: ObservableObject {
                             let length = filesVal?.objectForKeyedSubscript("length")?.toInt32() ?? 0
                             for i in 0..<length {
                                 if let item = filesVal?.objectAtIndexedSubscript(Int(i)),
-                                   let actionResult = parsePluginResult(item, pluginName: plugin.manifest.name, pluginCapabilities: plugin.manifest.capabilities) {
+                                   let actionResult = parsePluginResult(item, context: createContext(from: plugin)) {
                                     results.append(actionResult)
                                 }
                             }
@@ -319,20 +326,28 @@ class PluginManager: ObservableObject {
                     }
                 } else if result.isString {
                     if let newURLString = result.toString(), let newURL = URL(string: newURLString) {
-                        return [PluginActionResult(url: newURL, fileName: nil, iconURL: nil, size: nil, headers: nil, pluginName: plugin.manifest.name, pluginCapabilities: plugin.manifest.capabilities)]
+                        return [PluginActionResult(url: newURL, fileName: nil, iconURL: nil, size: nil, headers: nil, context: createContext(from: plugin))]
                     }
                 }
             }
             break // Exit loop if no retryable error
         }
 
-        return [PluginActionResult(url: url, fileName: nil, iconURL: nil, size: nil, headers: nil, pluginName: nil, pluginCapabilities: nil)]
+        return [PluginActionResult(url: url, fileName: nil, iconURL: nil, size: nil, headers: nil, context: nil)]
     }
 
-    private func parsePluginResult(_ result: JSValue, pluginName: String? = nil, pluginCapabilities: [String]? = nil) -> PluginActionResult? {
+    private func createContext(from plugin: LoadedPlugin) -> PluginContext {
+        return PluginContext(
+            name: plugin.manifest.name,
+            capabilities: plugin.manifest.capabilities,
+            reprocessOnResume: plugin.manifest.reprocessOnResume
+        )
+    }
+
+    private func parsePluginResult(_ result: JSValue, context: PluginContext? = nil) -> PluginActionResult? {
         if result.isString {
             if let urlString = result.toString(), let url = URL(string: urlString) {
-                return PluginActionResult(url: url, fileName: nil, iconURL: nil, size: nil, headers: nil, pluginName: pluginName, pluginCapabilities: pluginCapabilities)
+                return PluginActionResult(url: url, fileName: nil, iconURL: nil, size: nil, headers: nil, context: context)
             }
         } else if result.isObject {
             let urlVal = result.objectForKeyedSubscript("url")
@@ -352,7 +367,7 @@ class PluginManager: ObservableObject {
             }
 
             if let urlString = urlString, let url = URL(string: urlString) {
-                return PluginActionResult(url: url, fileName: fileName, iconURL: iconURL, size: size, headers: headers, pluginName: pluginName, pluginCapabilities: pluginCapabilities)
+                return PluginActionResult(url: url, fileName: fileName, iconURL: iconURL, size: size, headers: headers, context: context)
             }
         }
         return nil

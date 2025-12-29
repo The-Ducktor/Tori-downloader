@@ -267,16 +267,16 @@ struct AddDownloadView: View {
                             .foregroundColor(.secondary)
 
                         // Show plugin info if available
-                        if let pluginName = results.first?.pluginName {
+                        if let context = results.first?.context {
                             HStack(spacing: 6) {
                                 Image(systemName: "puzzlepiece.fill")
                                     .font(.caption)
                                     .foregroundColor(.accentColor)
-                                Text("Via: \(pluginName)")
+                                Text("Via: \(context.name)")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
 
-                                if let capabilities = results.first?.pluginCapabilities, !capabilities.isEmpty {
+                                if let capabilities = context.capabilities, !capabilities.isEmpty {
                                     HStack(spacing: 4) {
                                         ForEach(capabilities, id: \.self) { capability in
                                             Text(capability)

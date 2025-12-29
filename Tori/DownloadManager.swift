@@ -46,7 +46,7 @@ class DownloadManager: NSObject, ObservableObject {
     }
 
     /// Public entry point for adding downloads, suitable for extensions or URL schemes
-    @objc func handleURL(_ url: URL) {
+    func handleURL(_ url: URL) {
         addDownload(url: url)
     }
 
@@ -99,6 +99,9 @@ class DownloadManager: NSObject, ObservableObject {
                     item.iconURL = URL(string: pIcon)
                 }
 
+                // Set reprocessOnResume flag from plugin context
+                item.reprocessOnResume = result.context?.reprocessOnResume ?? false
+
                 // Prevent re-downloading if already completed or in progress (check other items)
                 if downloads.contains(where: { $0.id != item.id && $0.url == item.url && ($0.status == .downloading || $0.status == .completed) }) {
                     downloads.removeAll { $0.id == item.id }
@@ -117,6 +120,9 @@ class DownloadManager: NSObject, ObservableObject {
                     if let pIcon = result.iconURL {
                         newItem.iconURL = URL(string: pIcon)
                     }
+
+                    // Set reprocessOnResume flag from plugin context
+                    newItem.reprocessOnResume = result.context?.reprocessOnResume ?? false
 
                     // Prevent re-downloading
                     if !downloads.contains(where: { $0.url == newItem.url && ($0.status == .downloading || $0.status == .completed) }) {
@@ -190,7 +196,37 @@ class DownloadManager: NSObject, ObservableObject {
     }
 
     func resumeDownload(item: DownloadItem) {
-        guard item.status == .paused, let resumeData = item.resumeData else { return }
+        guard item.status == .paused else { return }
+
+        // If the plugin requires reprocessing, re-run the URL through the plugin
+        if item.reprocessOnResume {
+            item.status = .processing
+            item.resumeData = nil
+            notifyUpdate()
+
+            Task {
+                let results = await PluginManager.shared.processURL(item.originalURL)
+
+                await MainActor.run {
+                    if let result = results.first {
+                        item.url = result.url
+                        item.headers = result.headers
+                        if let pName = result.fileName {
+                            item.suggestedFileName = pName
+                        }
+                        if let pIcon = result.iconURL {
+                            item.iconURL = URL(string: pIcon)
+                        }
+                    }
+
+                    startDownload(item: item)
+                }
+            }
+            return
+        }
+
+        // Otherwise, resume from the paused state
+        guard let resumeData = item.resumeData else { return }
 
         item.status = .downloading
         item.resumeData = nil
@@ -383,6 +419,7 @@ class DownloadItem: ObservableObject, Identifiable {
     var suggestedFileName: String?
     var iconURL: URL?
     var headers: [String: String]?
+    var reprocessOnResume: Bool = false
 
     @Published var status: Status = .pending
     @Published var progress: Double = 0
