@@ -1,278 +1,267 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+import { onMount } from "svelte";
 
-    interface DownloadItem {
-        id: string;
-        fileName: string;
-        progress: number;
-        status: string;
-        statusText: string;
-        progressText: string;
-        sizeText?: string;
-        totalSizeText?: string;
-        speed?: string;
-        timeRemaining?: string;
-    }
+interface DownloadItem {
+	id: string;
+	fileName: string;
+	progress: number;
+	status: string;
+	statusText: string;
+	progressText: string;
+	sizeText?: string;
+	totalSizeText?: string;
+	speed?: string;
+	timeRemaining?: string;
+}
 
-    interface Settings {
-        interceptEnabled: boolean;
-        minInterceptSize: number;
-        bypassPlugins: boolean;
-        savePath: string;
-    }
+interface Settings {
+	interceptEnabled: boolean;
+	minInterceptSize: number;
+	bypassPlugins: boolean;
+	savePath: string;
+}
 
-    interface PluginActionResult {
-        url: string;
-        fileName?: string;
-        iconURL?: string;
-        size?: number;
-        headers?: Record<string, string>;
-    }
+interface PluginActionResult {
+	url: string;
+	fileName?: string;
+	iconURL?: string;
+	size?: number;
+	headers?: Record<string, string>;
+}
 
-    // State using Svelte 5 runes
-    let downloads = $state<DownloadItem[]>([]);
-    let isConnected = $state(false);
-    let settings = $state<Settings>({
-        interceptEnabled: true,
-        minInterceptSize: 50,
-        bypassPlugins: false,
-        savePath: "",
-    });
+// State using Svelte 5 runes
+let downloads = $state<DownloadItem[]>([]);
+let isConnected = $state(false);
+let settings = $state<Settings>({
+	interceptEnabled: true,
+	minInterceptSize: 50,
+	bypassPlugins: false,
+	savePath: "",
+});
 
-    let activePanel = $state<"settings" | "add" | null>(null);
-    let addState = $state<"input" | "processing" | "selection">("input");
-    let manualUrls = $state("");
-    let addBypassPlugins = $state(false);
-    let discoveredFiles = $state<PluginActionResult[]>([]);
-    let selectedFileUrls = $state<Set<string>>(new Set());
+let activePanel = $state<"settings" | "add" | null>(null);
+let addState = $state<"input" | "processing" | "selection">("input");
+let manualUrls = $state("");
+let addBypassPlugins = $state(false);
+let discoveredFiles = $state<PluginActionResult[]>([]);
+let selectedFileUrls = $state<Set<string>>(new Set());
 
-    const refreshState = async () => {
-        try {
-            const response = await chrome.runtime.sendMessage({
-                action: "getDownloads",
-            });
-            if (response && response.success) {
-                isConnected = response.connected;
-                downloads = response.downloads || [];
-            } else {
-                isConnected = false;
-            }
-        } catch (error) {
-            isConnected = false;
-        }
-    };
+const refreshState = async () => {
+	try {
+		const response = await chrome.runtime.sendMessage({
+			action: "getDownloads",
+		});
+		if (response && response.success) {
+			isConnected = response.connected;
+			downloads = response.downloads || [];
+		} else {
+			isConnected = false;
+		}
+	} catch (error) {
+		isConnected = false;
+	}
+};
 
-    onMount(() => {
-        refreshState();
-        const interval = setInterval(refreshState, 1000);
+onMount(() => {
+	refreshState();
+	const interval = setInterval(refreshState, 1000);
 
-        const messageListener = (message: any) => {
-            if (message.action === "downloadsUpdated") {
-                isConnected =
-                    message.connected !== undefined ? message.connected : true;
-                downloads = message.downloads || [];
-            }
-        };
-        chrome.runtime.onMessage.addListener(messageListener);
+	const messageListener = (message: any) => {
+		if (message.action === "downloadsUpdated") {
+			isConnected = message.connected !== undefined ? message.connected : true;
+			downloads = message.downloads || [];
+		}
+	};
+	chrome.runtime.onMessage.addListener(messageListener);
 
-        chrome.storage.local.get(
-            [
-                "interceptEnabled",
-                "minInterceptSize",
-                "bypassPlugins",
-                "savePath",
-            ],
-            (result) => {
-                settings = {
-                    interceptEnabled: result.interceptEnabled !== false,
-                    minInterceptSize:
-                        result.minInterceptSize !== undefined
-                            ? result.minInterceptSize
-                            : 50,
-                    bypassPlugins: result.bypassPlugins === true,
-                    savePath: result.savePath || "",
-                };
-            },
-        );
+	chrome.storage.local.get(
+		["interceptEnabled", "minInterceptSize", "bypassPlugins", "savePath"],
+		(result) => {
+			settings = {
+				interceptEnabled: result.interceptEnabled !== false,
+				minInterceptSize:
+					result.minInterceptSize !== undefined ? result.minInterceptSize : 50,
+				bypassPlugins: result.bypassPlugins === true,
+				savePath: result.savePath || "",
+			};
+		},
+	);
 
-        return () => {
-            clearInterval(interval);
-            chrome.runtime.onMessage.removeListener(messageListener);
-        };
-    });
+	return () => {
+		clearInterval(interval);
+		chrome.runtime.onMessage.removeListener(messageListener);
+	};
+});
 
-    const togglePanel = (panel: "settings" | "add") => {
-        activePanel = activePanel === panel ? null : panel;
-        if (activePanel === "add") {
-            addState = "input";
-            checkClipboard();
-        }
-    };
+const togglePanel = (panel: "settings" | "add") => {
+	activePanel = activePanel === panel ? null : panel;
+	if (activePanel === "add") {
+		addState = "input";
+		checkClipboard();
+	}
+};
 
-    const checkClipboard = async () => {
-        try {
-            if (manualUrls.trim()) return;
-            const text = await navigator.clipboard.readText();
-            if (text) {
-                const lines = text
-                    .split(/\s+/)
-                    .filter(
-                        (l) =>
-                            l.startsWith("http://") || l.startsWith("https://"),
-                    );
-                if (lines.length > 0) {
-                    manualUrls = lines.join("\n");
-                }
-            }
-        } catch (err) {
-            // Clipboard access might be denied
-        }
-    };
+const checkClipboard = async () => {
+	try {
+		if (manualUrls.trim()) return;
+		const text = await navigator.clipboard.readText();
+		if (text) {
+			const lines = text
+				.split(/\s+/)
+				.filter((l) => l.startsWith("http://") || l.startsWith("https://"));
+			if (lines.length > 0) {
+				manualUrls = lines.join("\n");
+			}
+		}
+	} catch (err) {
+		// Clipboard access might be denied
+	}
+};
 
-    const updateSetting = (key: keyof Settings, value: any) => {
-        settings = { ...settings, [key]: value };
-        chrome.storage.local.set({ [key]: value });
-    };
+const updateSetting = (key: keyof Settings, value: any) => {
+	settings = { ...settings, [key]: value };
+	chrome.storage.local.set({ [key]: value });
+};
 
-    const formatBytes = (bytes: number) => {
-        if (!bytes || bytes === 0) return "";
-        const k = 1024;
-        const sizes = ["B", "KB", "MB", "GB", "TB"];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / k ** i).toFixed(1)) + " " + sizes[i];
-    };
+const formatBytes = (bytes: number) => {
+	if (!bytes || bytes === 0) return "";
+	const k = 1024;
+	const sizes = ["B", "KB", "MB", "GB", "TB"];
+	const i = Math.floor(Math.log(bytes) / Math.log(k));
+	return parseFloat((bytes / k ** i).toFixed(1)) + " " + sizes[i];
+};
 
-    const handleManualAdd = async () => {
-        const urls = manualUrls
-            .split("\n")
-            .map((u) => u.trim())
-            .filter((u) => u.length > 0);
-        if (urls.length === 0) return;
+const handleManualAdd = async () => {
+	const urls = manualUrls
+		.split("\n")
+		.map((u) => u.trim())
+		.filter((u) => u.length > 0);
+	if (urls.length === 0) return;
 
-        if (addBypassPlugins) {
-            let successCount = 0;
-            for (const url of urls) {
-                try {
-                    const response = await fetch("http://localhost:18121/add", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            url: url,
-                            destinationPath: settings.savePath || null,
-                            bypassPlugins: true,
-                        }),
-                    });
-                    if (response.ok) successCount++;
-                } catch (err) {
-                    console.error("Failed to add download:", err);
-                }
-            }
-            if (successCount > 0) {
-                manualUrls = "";
-                activePanel = null;
-            }
-            return;
-        }
+	if (addBypassPlugins) {
+		let successCount = 0;
+		for (const url of urls) {
+			try {
+				const response = await fetch("http://localhost:18121/add", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						url: url,
+						destinationPath: settings.savePath || null,
+						bypassPlugins: true,
+					}),
+				});
+				if (response.ok) successCount++;
+			} catch (err) {
+				console.error("Failed to add download:", err);
+			}
+		}
+		if (successCount > 0) {
+			manualUrls = "";
+			activePanel = null;
+		}
+		return;
+	}
 
-        addState = "processing";
-        let allResults: PluginActionResult[] = [];
+	addState = "processing";
+	let allResults: PluginActionResult[] = [];
 
-        for (const url of urls) {
-            try {
-                const response = await fetch("http://localhost:18121/resolve", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ url }),
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.results) {
-                        allResults = [...allResults, ...data.results];
-                    }
-                }
-            } catch (err) {
-                console.error("Failed to resolve URL:", err);
-            }
-        }
+	for (const url of urls) {
+		try {
+			const response = await fetch("http://localhost:18121/resolve", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ url }),
+			});
+			if (response.ok) {
+				const data = await response.json();
+				if (data.results) {
+					allResults = [...allResults, ...data.results];
+				}
+			}
+		} catch (err) {
+			console.error("Failed to resolve URL:", err);
+		}
+	}
 
-        if (allResults.length > 1) {
-            discoveredFiles = allResults;
-            selectedFileUrls = new Set(allResults.map((r) => r.url));
-            addState = "selection";
-        } else if (allResults.length === 1) {
-            const res = allResults[0];
-            try {
-                await fetch("http://localhost:18121/add", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        url: res.url,
-                        fileName: res.fileName,
-                        headers: res.headers,
-                        destinationPath: settings.savePath || null,
-                        bypassPlugins: true,
-                    }),
-                });
-                manualUrls = "";
-                activePanel = null;
-            } catch (err) {
-                addState = "input";
-            }
-        } else {
-            addState = "input";
-        }
-    };
+	if (allResults.length > 1) {
+		discoveredFiles = allResults;
+		selectedFileUrls = new Set(allResults.map((r) => r.url));
+		addState = "selection";
+	} else if (allResults.length === 1) {
+		const res = allResults[0];
+		try {
+			await fetch("http://localhost:18121/add", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					url: res.url,
+					fileName: res.fileName,
+					headers: res.headers,
+					destinationPath: settings.savePath || null,
+					bypassPlugins: true,
+				}),
+			});
+			manualUrls = "";
+			activePanel = null;
+		} catch (err) {
+			addState = "input";
+		}
+	} else {
+		addState = "input";
+	}
+};
 
-    const handleAddSelected = async () => {
-        let successCount = 0;
-        for (const file of discoveredFiles) {
-            if (selectedFileUrls.has(file.url)) {
-                try {
-                    const response = await fetch("http://localhost:18121/add", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            url: file.url,
-                            fileName: file.fileName,
-                            headers: file.headers,
-                            destinationPath: settings.savePath || null,
-                            bypassPlugins: true,
-                        }),
-                    });
-                    if (response.ok) successCount++;
-                } catch (err) {
-                    console.error("Failed to add selected file:", err);
-                }
-            }
-        }
-        if (successCount > 0) {
-            manualUrls = "";
-            activePanel = null;
-            addState = "input";
-        }
-    };
+const handleAddSelected = async () => {
+	let successCount = 0;
+	for (const file of discoveredFiles) {
+		if (selectedFileUrls.has(file.url)) {
+			try {
+				const response = await fetch("http://localhost:18121/add", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						url: file.url,
+						fileName: file.fileName,
+						headers: file.headers,
+						destinationPath: settings.savePath || null,
+						bypassPlugins: true,
+					}),
+				});
+				if (response.ok) successCount++;
+			} catch (err) {
+				console.error("Failed to add selected file:", err);
+			}
+		}
+	}
+	if (successCount > 0) {
+		manualUrls = "";
+		activePanel = null;
+		addState = "input";
+	}
+};
 
-    const toggleFileSelection = (url: string) => {
-        const newSet = new Set(selectedFileUrls);
-        if (newSet.has(url)) {
-            newSet.delete(url);
-        } else {
-            newSet.add(url);
-        }
-        selectedFileUrls = newSet;
-    };
+const toggleFileSelection = (url: string) => {
+	const newSet = new Set(selectedFileUrls);
+	if (newSet.has(url)) {
+		newSet.delete(url);
+	} else {
+		newSet.add(url);
+	}
+	selectedFileUrls = newSet;
+};
 
-    const handleAction = async (id: string, endpoint: string) => {
-        try {
-            await fetch(`http://localhost:18121${endpoint}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id }),
-            });
-        } catch (err) {
-            console.error(`Failed to ${endpoint}:`, err);
-        }
-    };
+const handleAction = async (id: string, endpoint: string) => {
+	try {
+		await fetch(`http://localhost:18121${endpoint}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ id }),
+		});
+	} catch (err) {
+		console.error(`Failed to ${endpoint}:`, err);
+	}
+};
 </script>
 
 <div class="header">

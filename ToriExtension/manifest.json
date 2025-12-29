@@ -10,7 +10,8 @@
 		"nativeMessaging",
 		"webRequest",
 		"cookies",
-		"clipboardRead"
+		"clipboardRead",
+		"notifications"
 	],
 	"host_permissions": ["http://localhost/*", "<all_urls>"],
 	"background": {

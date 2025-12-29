@@ -262,25 +262,49 @@ async function sendToTori(
 		console.log("[Tori] Successfully sent download to app");
 
 		if (chrome.notifications) {
-			chrome.notifications.create({
-				type: "basic",
-				iconUrl: "icons/icon128.png",
-				title: "Tori Intercepted",
-				message: `Started: ${fileName || url}`,
-				priority: 1,
-			});
+			chrome.notifications.create(
+				{
+					type: "basic",
+					iconUrl: "icons/icon128.png",
+					title: "Tori Intercepted",
+					message: `Started: ${fileName || url}`,
+					priority: 1,
+				},
+				(notificationId) => {
+					if (chrome.runtime.lastError) {
+						console.error(
+							"[Tori] Failed to create notification:",
+							chrome.runtime.lastError,
+						);
+					} else {
+						console.log("[Tori] Notification created:", notificationId);
+					}
+				},
+			);
 		}
 	} catch (error) {
 		console.error("[Tori] Failed to send download to app:", error);
 
 		if (chrome.notifications) {
-			chrome.notifications.create({
-				type: "basic",
-				iconUrl: "icons/icon128.png",
-				title: "Tori Connection Error",
-				message: "Could not reach the Tori app. Is it running?",
-				priority: 2,
-			});
+			chrome.notifications.create(
+				{
+					type: "basic",
+					iconUrl: "icons/icon128.png",
+					title: "Tori Connection Error",
+					message: "Could not reach the Tori app. Is it running?",
+					priority: 2,
+				},
+				(notificationId) => {
+					if (chrome.runtime.lastError) {
+						console.error(
+							"[Tori] Failed to create notification:",
+							chrome.runtime.lastError,
+						);
+					} else {
+						console.log("[Tori] Error notification created:", notificationId);
+					}
+				},
+			);
 		}
 	}
 }
