@@ -1,23 +1,25 @@
 {
-  "name": "tori-extension",
-  "version": "1.0.0",
-  "description": "Tori Download Interceptor Extension",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "watch": "vite build --watch",
-    "check": "svelte-check --tsconfig ./tsconfig.json"
-  },
-  "dependencies": {
-    "svelte": "^5.46.1"
-  },
-  "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^6.2.1",
-    "@types/chrome": "^0.1.32",
-    "svelte-check": "^4.3.5",
-    "tslib": "^2.8.1",
-    "typescript": "^5.9.3",
-    "vite": "npm:rolldown-vite@latest"
-  }
+	"name": "tori-extension",
+	"version": "1.0.0",
+	"description": "Tori Download Interceptor Extension",
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"watch": "vite build --watch",
+		"check": "svelte-check --tsconfig ./tsconfig.json"
+	},
+	"dependencies": {
+		"svelte": "^5.46.1"
+	},
+	"devDependencies": {
+		"@sveltejs/vite-plugin-svelte": "^6.2.1",
+		"@tailwindcss/vite": "^4.1.18",
+		"@types/chrome": "^0.1.32",
+		"svelte-check": "^4.3.5",
+		"tailwindcss": "^4.1.18",
+		"tslib": "^2.8.1",
+		"typescript": "^5.9.3",
+		"vite": "npm:rolldown-vite@latest"
+	}
 }

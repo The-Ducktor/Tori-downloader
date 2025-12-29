@@ -12,6 +12,8 @@ let socket = null;
 let currentDownloads = [];
 let reconnectTimer = null;
 let isConnecting = false;
+const scriptStartTime = Date.now();
+let socketConnectionTime = null;
 
 console.log("[Tori] Background script initialized");
 
@@ -68,6 +70,7 @@ function connectWebSocket() {
 
 	socket.onopen = () => {
 		isConnecting = false;
+		socketConnectionTime = Date.now();
 		console.log("[Tori] WebSocket connected");
 		if (reconnectTimer) {
 			clearTimeout(reconnectTimer);
@@ -79,7 +82,16 @@ function connectWebSocket() {
 		try {
 			const data = JSON.parse(event.data);
 			if (Array.isArray(data)) {
-				currentDownloads = data;
+				// Filter out downloads that started before the socket connection
+				// to prevent showing historical downloads from the server
+				const filteredDownloads = socketConnectionTime
+					? data.filter((download) => {
+							const downloadStartTime = new Date(download.startTime).getTime();
+							return downloadStartTime >= socketConnectionTime - 2000; // 2s buffer for clock skew
+						})
+					: data;
+
+				currentDownloads = filteredDownloads;
 				// Broadcast to popup if it's open
 				chrome.runtime
 					.sendMessage({
@@ -130,6 +142,13 @@ connectWebSocket();
  * Intercepts browser downloads and redirects them to Tori.
  */
 chrome.downloads.onCreated.addListener(async (downloadItem) => {
+	// Ignore downloads that were created before the extension started
+	// to prevent re-intercepting old downloads on browser restart.
+	const downloadStartTime = new Date(downloadItem.startTime).getTime();
+	if (downloadStartTime < scriptStartTime - 5000) {
+		return;
+	}
+
 	// Check if interception is enabled and get settings
 	const settings = await chrome.storage.local.get([
 		"interceptEnabled",

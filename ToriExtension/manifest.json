@@ -1,22 +1,22 @@
 {
-  "manifest_version": 3,
-  "name": "Tori Download Interceptor",
-  "version": "1.0",
-  "description": "Intercepts downloads and sends them to Tori.",
-  "permissions": [
-    "downloads",
-    "downloads.shelf",
-    "storage",
-    "nativeMessaging",
-    "webRequest",
-    "cookies",
-    "clipboardRead"
-  ],
-  "host_permissions": ["http://localhost/*", "<all_urls>"],
-  "background": {
-    "service_worker": "background.js"
-  },
-  "action": {
-    "default_popup": "dist/popup.html"
-  }
+	"manifest_version": 3,
+	"name": "Tori Download Interceptor",
+	"version": "1.0",
+	"description": "Intercepts downloads and sends them to Tori.",
+	"permissions": [
+		"downloads",
+		"downloads.shelf",
+		"storage",
+		"nativeMessaging",
+		"webRequest",
+		"cookies",
+		"clipboardRead"
+	],
+	"host_permissions": ["http://localhost/*", "<all_urls>"],
+	"background": {
+		"service_worker": "background.js"
+	},
+	"action": {
+		"default_popup": "dist/popup.html"
+	}
 }

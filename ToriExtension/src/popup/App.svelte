@@ -1,274 +1,267 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+import { onMount } from "svelte";
 
-    interface DownloadItem {
-        id: string;
-        fileName: string;
-        progress: number;
-        status: string;
-        statusText: string;
-        progressText: string;
-        sizeText?: string;
-        totalSizeText?: string;
-        speed?: string;
-        timeRemaining?: string;
-    }
+interface DownloadItem {
+	id: string;
+	fileName: string;
+	progress: number;
+	status: string;
+	statusText: string;
+	progressText: string;
+	sizeText?: string;
+	totalSizeText?: string;
+	speed?: string;
+	timeRemaining?: string;
+}
 
-    interface Settings {
-        interceptEnabled: boolean;
-        minInterceptSize: number;
-        bypassPlugins: boolean;
-        savePath: string;
-    }
+interface Settings {
+	interceptEnabled: boolean;
+	minInterceptSize: number;
+	bypassPlugins: boolean;
+	savePath: string;
+}
 
-    // State using Svelte 5 runes
-    let downloads = $state<DownloadItem[]>([]);
-    let isConnected = $state(false);
-    let settings = $state<Settings>({
-        interceptEnabled: true,
-        minInterceptSize: 50,
-        bypassPlugins: false,
-        savePath: "",
-    });
+interface PluginActionResult {
+	url: string;
+	fileName?: string;
+	iconURL?: string;
+	size?: number;
+	headers?: Record<string, string>;
+}
 
-    interface PluginActionResult {
-        url: string;
-        fileName?: string;
-        iconURL?: string;
-        size?: number;
-        headers?: Record<string, string>;
-    }
+// State using Svelte 5 runes
+let downloads = $state<DownloadItem[]>([]);
+let isConnected = $state(false);
+let settings = $state<Settings>({
+	interceptEnabled: true,
+	minInterceptSize: 50,
+	bypassPlugins: false,
+	savePath: "",
+});
 
-    let activePanel = $state<"settings" | "add" | null>(null);
-    let addState = $state<"input" | "processing" | "selection">("input");
-    let manualUrls = $state("");
-    let addBypassPlugins = $state(false);
-    let discoveredFiles = $state<PluginActionResult[]>([]);
-    let selectedFileUrls = $state<Set<string>>(new Set());
+let activePanel = $state<"settings" | "add" | null>(null);
+let addState = $state<"input" | "processing" | "selection">("input");
+let manualUrls = $state("");
+const addBypassPlugins = $state(false);
+let discoveredFiles = $state<PluginActionResult[]>([]);
+let selectedFileUrls = $state<Set<string>>(new Set());
 
-    const refreshState = async () => {
-        try {
-            const response = await chrome.runtime.sendMessage({
-                action: "getDownloads",
-            });
-            if (response && response.success) {
-                isConnected = response.connected;
-                downloads = response.downloads || [];
-            } else {
-                isConnected = false;
-            }
-        } catch (error) {
-            isConnected = false;
-        }
-    };
+const refreshState = async () => {
+	try {
+		const response = await chrome.runtime.sendMessage({
+			action: "getDownloads",
+		});
+		if (response && response.success) {
+			isConnected = response.connected;
+			downloads = response.downloads || [];
+		} else {
+			isConnected = false;
+		}
+	} catch (error) {
+		isConnected = false;
+	}
+};
 
-    onMount(() => {
-        refreshState();
+onMount(() => {
+	refreshState();
+	const interval = setInterval(refreshState, 1000);
 
-        const messageListener = (message: any) => {
-            if (message.action === "downloadsUpdated") {
-                isConnected =
-                    message.connected !== undefined ? message.connected : true;
-                downloads = message.downloads || [];
-            }
-        };
-        chrome.runtime.onMessage.addListener(messageListener);
+	const messageListener = (message: any) => {
+		if (message.action === "downloadsUpdated") {
+			isConnected = message.connected !== undefined ? message.connected : true;
+			downloads = message.downloads || [];
+		}
+	};
+	chrome.runtime.onMessage.addListener(messageListener);
 
-        chrome.storage.local.get(
-            [
-                "interceptEnabled",
-                "minInterceptSize",
-                "bypassPlugins",
-                "savePath",
-            ],
-            (result) => {
-                settings = {
-                    interceptEnabled: result.interceptEnabled !== false,
-                    minInterceptSize:
-                        result.minInterceptSize !== undefined
-                            ? result.minInterceptSize
-                            : 50,
-                    bypassPlugins: result.bypassPlugins === true,
-                    savePath: result.savePath || "",
-                };
-            },
-        );
+	chrome.storage.local.get(
+		["interceptEnabled", "minInterceptSize", "bypassPlugins", "savePath"],
+		(result) => {
+			settings = {
+				interceptEnabled: result.interceptEnabled !== false,
+				minInterceptSize:
+					result.minInterceptSize !== undefined ? result.minInterceptSize : 50,
+				bypassPlugins: result.bypassPlugins === true,
+				savePath: result.savePath || "",
+			};
+		},
+	);
 
-        return () => chrome.runtime.onMessage.removeListener(messageListener);
-    });
+	return () => {
+		clearInterval(interval);
+		chrome.runtime.onMessage.removeListener(messageListener);
+	};
+});
 
-    const togglePanel = (panel: "settings" | "add") => {
-        activePanel = activePanel === panel ? null : panel;
-        if (activePanel === "add") {
-            addState = "input";
-            checkClipboard();
-        }
-    };
+const togglePanel = (panel: "settings" | "add") => {
+	activePanel = activePanel === panel ? null : panel;
+	if (activePanel === "add") {
+		addState = "input";
+		checkClipboard();
+	}
+};
 
-    const checkClipboard = async () => {
-        try {
-            if (manualUrls.trim()) return;
-            const text = await navigator.clipboard.readText();
-            if (text) {
-                const lines = text
-                    .split(/\s+/)
-                    .filter(
-                        (l) =>
-                            l.startsWith("http://") || l.startsWith("https://"),
-                    );
-                if (lines.length > 0) {
-                    manualUrls = lines.join("\n");
-                }
-            }
-        } catch (err) {
-            // Clipboard access might be denied
-        }
-    };
+const checkClipboard = async () => {
+	try {
+		if (manualUrls.trim()) return;
+		const text = await navigator.clipboard.readText();
+		if (text) {
+			const lines = text
+				.split(/\s+/)
+				.filter((l) => l.startsWith("http://") || l.startsWith("https://"));
+			if (lines.length > 0) {
+				manualUrls = lines.join("\n");
+			}
+		}
+	} catch (err) {
+		// Clipboard access might be denied
+	}
+};
 
-    const updateSetting = (key: keyof Settings, value: any) => {
-        settings = { ...settings, [key]: value };
-        chrome.storage.local.set({ [key]: value });
-    };
+const updateSetting = (key: keyof Settings, value: any) => {
+	settings = { ...settings, [key]: value };
+	chrome.storage.local.set({ [key]: value });
+};
 
-    const formatBytes = (bytes: number) => {
-        if (!bytes || bytes === 0) return "";
-        const k = 1024;
-        const sizes = ["B", "KB", "MB", "GB", "TB"];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-    };
+const formatBytes = (bytes: number) => {
+	if (!bytes || bytes === 0) return "";
+	const k = 1024;
+	const sizes = ["B", "KB", "MB", "GB", "TB"];
+	const i = Math.floor(Math.log(bytes) / Math.log(k));
+	return parseFloat((bytes / k ** i).toFixed(1)) + " " + sizes[i];
+};
 
-    const handleManualAdd = async () => {
-        const urls = manualUrls
-            .split("\n")
-            .map((u) => u.trim())
-            .filter((u) => u.length > 0);
-        if (urls.length === 0) return;
+const handleManualAdd = async () => {
+	const urls = manualUrls
+		.split("\n")
+		.map((u) => u.trim())
+		.filter((u) => u.length > 0);
+	if (urls.length === 0) return;
 
-        if (addBypassPlugins) {
-            let successCount = 0;
-            for (const url of urls) {
-                try {
-                    const response = await fetch("http://localhost:18121/add", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            url: url,
-                            destinationPath: settings.savePath || null,
-                            bypassPlugins: true,
-                        }),
-                    });
-                    if (response.ok) successCount++;
-                } catch (err) {
-                    console.error("Failed to add download:", err);
-                }
-            }
-            if (successCount > 0) {
-                manualUrls = "";
-                activePanel = null;
-            }
-            return;
-        }
+	if (addBypassPlugins) {
+		let successCount = 0;
+		for (const url of urls) {
+			try {
+				const response = await fetch("http://localhost:18121/add", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						url: url,
+						destinationPath: settings.savePath || null,
+						bypassPlugins: true,
+					}),
+				});
+				if (response.ok) successCount++;
+			} catch (err) {
+				console.error("Failed to add download:", err);
+			}
+		}
+		if (successCount > 0) {
+			manualUrls = "";
+			activePanel = null;
+		}
+		return;
+	}
 
-        addState = "processing";
-        let allResults: PluginActionResult[] = [];
+	addState = "processing";
+	let allResults: PluginActionResult[] = [];
 
-        for (const url of urls) {
-            try {
-                const response = await fetch("http://localhost:18121/resolve", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ url }),
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.results) {
-                        allResults = [...allResults, ...data.results];
-                    }
-                }
-            } catch (err) {
-                console.error("Failed to resolve URL:", err);
-            }
-        }
+	for (const url of urls) {
+		try {
+			const response = await fetch("http://localhost:18121/resolve", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ url }),
+			});
+			if (response.ok) {
+				const data = await response.json();
+				if (data.results) {
+					allResults = [...allResults, ...data.results];
+				}
+			}
+		} catch (err) {
+			console.error("Failed to resolve URL:", err);
+		}
+	}
 
-        if (allResults.length > 1) {
-            discoveredFiles = allResults;
-            selectedFileUrls = new Set(allResults.map((r) => r.url));
-            addState = "selection";
-        } else if (allResults.length === 1) {
-            const res = allResults[0];
-            try {
-                await fetch("http://localhost:18121/add", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        url: res.url,
-                        fileName: res.fileName,
-                        headers: res.headers,
-                        destinationPath: settings.savePath || null,
-                        bypassPlugins: true,
-                    }),
-                });
-                manualUrls = "";
-                activePanel = null;
-            } catch (err) {
-                addState = "input";
-            }
-        } else {
-            addState = "input";
-        }
-    };
+	if (allResults.length > 1) {
+		discoveredFiles = allResults;
+		selectedFileUrls = new Set(allResults.map((r) => r.url));
+		addState = "selection";
+	} else if (allResults.length === 1) {
+		const res = allResults[0];
+		try {
+			await fetch("http://localhost:18121/add", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					url: res.url,
+					fileName: res.fileName,
+					headers: res.headers,
+					destinationPath: settings.savePath || null,
+					bypassPlugins: true,
+				}),
+			});
+			manualUrls = "";
+			activePanel = null;
+		} catch (err) {
+			addState = "input";
+		}
+	} else {
+		addState = "input";
+	}
+};
 
-    const handleAddSelected = async () => {
-        let successCount = 0;
-        for (const file of discoveredFiles) {
-            if (selectedFileUrls.has(file.url)) {
-                try {
-                    const response = await fetch("http://localhost:18121/add", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            url: file.url,
-                            fileName: file.fileName,
-                            headers: file.headers,
-                            destinationPath: settings.savePath || null,
-                            bypassPlugins: true,
-                        }),
-                    });
-                    if (response.ok) successCount++;
-                } catch (err) {
-                    console.error("Failed to add selected file:", err);
-                }
-            }
-        }
-        if (successCount > 0) {
-            manualUrls = "";
-            activePanel = null;
-            addState = "input";
-        }
-    };
+const handleAddSelected = async () => {
+	let successCount = 0;
+	for (const file of discoveredFiles) {
+		if (selectedFileUrls.has(file.url)) {
+			try {
+				const response = await fetch("http://localhost:18121/add", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						url: file.url,
+						fileName: file.fileName,
+						headers: file.headers,
+						destinationPath: settings.savePath || null,
+						bypassPlugins: true,
+					}),
+				});
+				if (response.ok) successCount++;
+			} catch (err) {
+				console.error("Failed to add selected file:", err);
+			}
+		}
+	}
+	if (successCount > 0) {
+		manualUrls = "";
+		activePanel = null;
+		addState = "input";
+	}
+};
 
-    const toggleFileSelection = (url: string) => {
-        const newSet = new Set(selectedFileUrls);
-        if (newSet.has(url)) {
-            newSet.delete(url);
-        } else {
-            newSet.add(url);
-        }
-        selectedFileUrls = newSet;
-    };
+const toggleFileSelection = (url: string) => {
+	const newSet = new Set(selectedFileUrls);
+	if (newSet.has(url)) {
+		newSet.delete(url);
+	} else {
+		newSet.add(url);
+	}
+	selectedFileUrls = newSet;
+};
 
-    const handleAction = async (id: string, endpoint: string) => {
-        try {
-            await fetch(`http://localhost:18121${endpoint}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id }),
-            });
-        } catch (err) {
-            console.error(`Failed to ${endpoint}:`, err);
-        }
-    };
+const handleAction = async (id: string, endpoint: string) => {
+	try {
+		await fetch(`http://localhost:18121${endpoint}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ id }),
+		});
+	} catch (err) {
+		console.error(`Failed to ${endpoint}:`, err);
+	}
+};
 </script>
 
 <div class="header">
@@ -324,26 +317,20 @@
 <div class="panel" class:open={activePanel === "add"}>
     <div class="panel-content">
         {#if addState === "input"}
-            <div
-                class="row"
-                style="flex-direction: column; align-items: stretch; gap: 8px;"
-            >
-                <div
-                    style="display: flex; justify-content: space-between; align-items: center;"
-                >
-                    <span style="font-weight: 600; font-size: 11px;"
+            <div class="flex flex-col gap-2">
+                <div class="flex justify-between items-center">
+                    <span class="font-semibold text-[11px] text-text-primary"
                         >URLs (one per line)</span
                     >
                     {#if manualUrls.trim()}
-                        <span style="font-size: 10px; opacity: 0.7;"
-                            >{manualUrls.split("\n").filter((u) => u.trim())
-                                .length} detected</span
-                        >
+                        <span class="text-[10px] opacity-60">
+                            {manualUrls.split("\n").filter((u) => u.trim())
+                                .length} detected
+                        </span>
                     {/if}
                 </div>
                 <textarea
-                    class="input-field"
-                    style="height: 80px; resize: none; padding: 8px; font-family: monospace; font-size: 11px;"
+                    class="input-field h-24 resize-none p-2 font-mono text-[11px] leading-relaxed"
                     placeholder="https://example.com/file.zip&#10;https://another.com/video.mp4"
                     bind:value={manualUrls}
                     onkeydown={(e) =>
@@ -352,8 +339,8 @@
                         handleManualAdd()}
                 ></textarea>
             </div>
-            <div class="row">
-                <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="row mt-1">
+                <div class="flex items-center gap-2 cursor-pointer select-none">
                     <label class="switch">
                         <input
                             type="checkbox"
@@ -361,7 +348,7 @@
                         />
                         <span class="slider"></span>
                     </label>
-                    <span>Bypass Plugins</span>
+                    <span class="text-[11px]">Bypass Plugins</span>
                 </div>
                 <button
                     class="btn-primary"
@@ -372,27 +359,19 @@
                 </button>
             </div>
         {:else if addState === "processing"}
-            <div
-                style="display: flex; flex-direction: column; align-items: center; padding: 20px; gap: 10px;"
-            >
-                <div
-                    class="status-dot online"
-                    style="width: 12px; height: 12px;"
-                ></div>
-                <span style="font-size: 12px; font-weight: 500;"
+            <div class="flex flex-col items-center py-8 gap-3">
+                <div class="status-dot online w-3 h-3 animate-pulse"></div>
+                <span class="text-xs font-medium text-text-primary"
                     >Resolving links...</span
                 >
             </div>
         {:else if addState === "selection"}
-            <div style="display: flex; flex-direction: column; gap: 8px;">
-                <div
-                    style="display: flex; justify-content: space-between; align-items: center;"
-                >
-                    <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="flex flex-col gap-2">
+                <div class="flex justify-between items-center">
+                    <div class="flex items-center gap-2">
                         <button
-                            class="icon-btn"
+                            class="icon-btn p-1"
                             onclick={() => (addState = "input")}
-                            style="padding: 2px;"
                             title="Back"
                         >
                             <svg
@@ -409,14 +388,15 @@
                                 <polyline points="12 19 5 12 12 5"></polyline>
                             </svg>
                         </button>
-                        <span style="font-weight: 600; font-size: 11px;"
-                            >Select Files ({discoveredFiles.length})</span
+                        <span
+                            class="font-semibold text-[11px] text-text-primary"
                         >
+                            Select Files ({discoveredFiles.length})
+                        </span>
                     </div>
-                    <div style="display: flex; gap: 4px;">
+                    <div class="flex gap-1">
                         <button
-                            class="icon-btn"
-                            style="font-size: 9px; padding: 2px 6px; background: rgba(255,255,255,0.05);"
+                            class="text-[9px] px-2 py-0.5 bg-white/5 hover:bg-white/10 rounded border border-border transition-colors"
                             onclick={() =>
                                 (selectedFileUrls = new Set(
                                     discoveredFiles.map((f) => f.url),
@@ -425,8 +405,7 @@
                             All
                         </button>
                         <button
-                            class="icon-btn"
-                            style="font-size: 9px; padding: 2px 6px; background: rgba(255,255,255,0.05);"
+                            class="text-[9px] px-2 py-0.5 bg-white/5 hover:bg-white/10 rounded border border-border transition-colors"
                             onclick={() => (selectedFileUrls = new Set())}
                         >
                             None
@@ -434,40 +413,45 @@
                     </div>
                 </div>
                 <div
-                    style="max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--border-color); border-radius: 6px; padding: 4px;"
+                    class="max-h-[140px] overflow-y-auto flex flex-col gap-1 border border-border rounded-md p-1 bg-bg/50"
                 >
                     {#each discoveredFiles as file}
                         <div
-                            class="row"
-                            style="justify-content: flex-start; gap: 8px; padding: 4px; background: rgba(255,255,255,0.02); border-radius: 4px;"
+                            class="flex items-start gap-2 p-2 bg-white/[0.02] hover:bg-white/[0.05] rounded transition-colors cursor-pointer"
+                            onclick={() => toggleFileSelection(file.url)}
+                            role="button"
+                            tabindex="0"
+                            onkeydown={(e) =>
+                                e.key === "Enter" &&
+                                toggleFileSelection(file.url)}
                         >
                             <input
                                 type="checkbox"
+                                class="mt-0.5"
                                 checked={selectedFileUrls.has(file.url)}
+                                onclick={(e) => e.stopPropagation()}
                                 onchange={() => toggleFileSelection(file.url)}
                             />
-                            <div
-                                style="display: flex; flex-direction: column; overflow: hidden; flex: 1;"
-                            >
+                            <div class="flex flex-col overflow-hidden flex-1">
                                 <div
-                                    style="display: flex; justify-content: space-between; align-items: center; gap: 8px;"
+                                    class="flex justify-between items-center gap-2"
                                 >
                                     <span
-                                        style="font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary);"
+                                        class="text-[11px] truncate text-text-primary font-medium"
                                     >
                                         {file.fileName ||
                                             file.url.split("/").pop()}
                                     </span>
                                     {#if file.size}
                                         <span
-                                            style="font-size: 9px; opacity: 0.6; flex-shrink: 0;"
+                                            class="text-[9px] opacity-60 shrink-0 tabular-nums"
                                         >
                                             {formatBytes(file.size)}
                                         </span>
                                     {/if}
                                 </div>
                                 <span
-                                    style="font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.5;"
+                                    class="text-[9px] truncate opacity-40 font-mono"
                                 >
                                     {file.url}
                                 </span>
@@ -475,8 +459,8 @@
                         </div>
                     {/each}
                 </div>
-                <div class="row">
-                    <span style="font-size: 10px;"
+                <div class="row mt-1">
+                    <span class="text-[10px] opacity-60"
                         >{selectedFileUrls.size} selected</span
                     >
                     <button
@@ -495,7 +479,7 @@
 <div class="panel" class:open={activePanel === "settings"}>
     <div class="panel-content">
         <div class="row">
-            <span>Intercept Downloads</span>
+            <span class="text-text-primary">Intercept Downloads</span>
             <label class="switch">
                 <input
                     type="checkbox"
@@ -510,11 +494,10 @@
             </label>
         </div>
         <div class="row">
-            <span>Min Intercept Size (MB)</span>
+            <span class="text-text-primary">Min Intercept Size (MB)</span>
             <input
                 type="number"
-                class="input-field"
-                style="width: 60px"
+                class="input-field w-[64px] text-center"
                 value={settings.minInterceptSize}
                 oninput={(e) =>
                     updateSetting(
@@ -525,7 +508,7 @@
             />
         </div>
         <div class="row">
-            <span>Bypass Plugins</span>
+            <span class="text-text-primary">Bypass Plugins</span>
             <label class="switch">
                 <input
                     type="checkbox"
@@ -536,11 +519,8 @@
                 <span class="slider"></span>
             </label>
         </div>
-        <div
-            class="row"
-            style="flex-direction: column; align-items: flex-start"
-        >
-            <span>Default Save Path</span>
+        <div class="flex flex-col gap-1.5">
+            <span class="text-text-primary">Default Save Path</span>
             <input
                 type="text"
                 class="input-field"
@@ -556,19 +536,19 @@
 <div class="download-list">
     {#if downloads.length > 0}
         {#each downloads as item (item.id)}
-            <div class="download-item">
+            <div class="download-item group">
                 <div class="file-name" title={item.fileName}>
                     {item.fileName}
                 </div>
-                <div class="progress-container">
+                <div class="progress-container bg-border/30">
                     <div
-                        class="progress-bar"
+                        class="progress-bar shadow-[0_0_8px_rgba(10,132,255,0.3)]"
                         style:width="{(item.progress * 100).toFixed(1)}%"
                     ></div>
                 </div>
                 <div class="meta-info">
-                    <span>{item.statusText}</span>
-                    <span>
+                    <span class="font-medium">{item.statusText}</span>
+                    <span class="opacity-80">
                         {item.progressText}
                         {#if (item.status === "downloading" || item.status === "paused") && item.sizeText}
                             • {item.sizeText}
@@ -579,18 +559,17 @@
                     </span>
                 </div>
                 {#if item.status === "downloading"}
-                    <div
-                        class="meta-info"
-                        style="margin-top: 4px; opacity: 0.6;"
-                    >
+                    <div class="meta-info mt-1 opacity-50 font-mono">
                         <span>{item.speed}</span>
                         <span>{item.timeRemaining} left</span>
                     </div>
                 {/if}
-                <div class="item-actions">
+                <div
+                    class="item-actions opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                >
                     {#if item.status === "downloading" || item.status === "processing"}
                         <button
-                            class="action-btn pause-btn"
+                            class="action-btn"
                             title="Pause"
                             onclick={() => handleAction(item.id, "/pause")}
                         >
@@ -607,7 +586,7 @@
                     {/if}
                     {#if item.status === "paused"}
                         <button
-                            class="action-btn resume-btn"
+                            class="action-btn"
                             title="Resume"
                             onclick={() => handleAction(item.id, "/resume")}
                         >
@@ -623,7 +602,7 @@
                     {/if}
                     {#if !["completed", "failed", "canceled"].includes(item.status)}
                         <button
-                            class="action-btn cancel-btn"
+                            class="action-btn"
                             title="Cancel"
                             onclick={() => handleAction(item.id, "/cancel")}
                         >
@@ -643,7 +622,7 @@
                         </button>
                     {/if}
                     <button
-                        class="action-btn remove-btn danger"
+                        class="action-btn danger"
                         title="Remove"
                         onclick={() => handleAction(item.id, "/remove")}
                     >
@@ -668,10 +647,12 @@
         {/each}
     {:else}
         <div class="empty-state">
-            <div class="empty-icon">🐦</div>
-            <p>{isConnected ? "No active downloads" : "Connecting..."}</p>
+            <div class="empty-icon grayscale opacity-50">🐦</div>
+            <p class="font-medium">
+                {isConnected ? "No active downloads" : "Connecting to Tori..."}
+            </p>
         </div>
     {/if}
 </div>
 
-<div class="footer">Tori v1.0</div>
+<div class="footer">Tori v1.0 ex ver 0.1</div>
