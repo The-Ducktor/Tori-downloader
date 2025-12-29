@@ -14,6 +14,7 @@ let reconnectTimer = null;
 let isConnecting = false;
 const scriptStartTime = Date.now();
 let socketConnectionTime = null;
+let trackedDownloadIds = new Set(); // Track which downloads we've seen
 
 console.log("[Tori] Background script initialized");
 
@@ -82,14 +83,18 @@ function connectWebSocket() {
 		try {
 			const data = JSON.parse(event.data);
 			if (Array.isArray(data)) {
-				// Filter out downloads that started before the socket connection
-				// to prevent showing historical downloads from the server
-				const filteredDownloads = socketConnectionTime
-					? data.filter((download) => {
-							const downloadStartTime = new Date(download.startTime).getTime();
-							return downloadStartTime >= socketConnectionTime - 2000; // 2s buffer for clock skew
-						})
-					: data;
+				// Only show downloads that were received after the socket connected
+				// This filters out historical downloads on initial connection
+				const filteredDownloads = data.filter((download) => {
+					// Keep only downloads we haven't tracked yet, or those added after connection
+					if (socketConnectionTime && !trackedDownloadIds.has(download.id)) {
+						// Track this new download
+						trackedDownloadIds.add(download.id);
+						return true;
+					}
+					// Always show downloads that were already tracked (updates to existing downloads)
+					return trackedDownloadIds.has(download.id);
+				});
 
 				currentDownloads = filteredDownloads;
 				// Broadcast to popup if it's open
@@ -256,23 +261,27 @@ async function sendToTori(
 
 		console.log("[Tori] Successfully sent download to app");
 
-		chrome.notifications.create({
-			type: "basic",
-			iconUrl: "icons/icon128.png",
-			title: "Tori Intercepted",
-			message: `Started: ${fileName || url}`,
-			priority: 1,
-		});
+		if (chrome.notifications) {
+			chrome.notifications.create({
+				type: "basic",
+				iconUrl: "icons/icon128.png",
+				title: "Tori Intercepted",
+				message: `Started: ${fileName || url}`,
+				priority: 1,
+			});
+		}
 	} catch (error) {
 		console.error("[Tori] Failed to send download to app:", error);
 
-		chrome.notifications.create({
-			type: "basic",
-			iconUrl: "icons/icon128.png",
-			title: "Tori Connection Error",
-			message: "Could not reach the Tori app. Is it running?",
-			priority: 2,
-		});
+		if (chrome.notifications) {
+			chrome.notifications.create({
+				type: "basic",
+				iconUrl: "icons/icon128.png",
+				title: "Tori Connection Error",
+				message: "Could not reach the Tori app. Is it running?",
+				priority: 2,
+			});
+		}
 	}
 }
 
