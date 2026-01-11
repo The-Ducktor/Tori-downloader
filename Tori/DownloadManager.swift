@@ -184,6 +184,20 @@ class DownloadManager: NSObject, ObservableObject {
         guard item.status == .downloading, let task = item.task else { return }
 
         let itemID = item.id
+
+        // For plugins that reprocess on resume, don't save resume data
+        if item.reprocessOnResume {
+            print("Pausing download for \(item.displayName) without resume data due to reprocessing requirement")
+            DispatchQueue.main.async {
+                guard let itemToPause = self.downloads.first(where: { $0.id == itemID }) else { return }
+                itemToPause.status = .paused
+                itemToPause.task = nil
+                self.notifyUpdate()
+            }
+            task.cancel()
+            return
+        }
+
         task.cancel(byProducingResumeData: { resumeData in
             DispatchQueue.main.async {
                 guard let itemToPause = self.downloads.first(where: { $0.id == itemID }) else { return }
