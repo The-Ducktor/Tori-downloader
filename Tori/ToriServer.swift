@@ -17,6 +17,15 @@ final class ToriServer: ObservableObject, @unchecked Sendable {
     private let minUpdateInterval: TimeInterval = 0.5 // Max 2 updates per second to save battery
     private var pendingUpdate = false
 
+    // Cached JSON and WebSocket frame to avoid repeated serialization
+    private var cachedJSON: String?
+    private var cachedFrame: Data?
+    private var jsonIsDirty = true
+
+    // Pre-allocated response templates
+    private static let okResponse = "{\"status\": \"ok\"}"
+    private static let corsHeaders = "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\n"
+
     init(downloadManager: DownloadManager) {
         self.downloadManager = downloadManager
         // Tori's default API port
@@ -25,9 +34,45 @@ final class ToriServer: ObservableObject, @unchecked Sendable {
         // Set up the update hook from DownloadManager
         self.downloadManager.onUpdate = { [weak self] in
             MainActor.assumeIsolated {
+                self?.jsonIsDirty = true
                 self?.scheduleUpdate()
             }
         }
+    }
+
+    private func getCachedJSON() -> String {
+        if jsonIsDirty || cachedJSON == nil {
+            cachedJSON = downloadManager.downloadsAsJSON()
+            cachedFrame = nil // Invalidate frame cache too
+            jsonIsDirty = false
+        }
+        return cachedJSON!
+    }
+
+    private func getCachedFrame() -> Data {
+        if cachedFrame == nil {
+            let json = getCachedJSON()
+            let data = Data(json.utf8)
+
+            // Construct WebSocket Text Frame (Server to Client, no masking)
+            // 0x81 = Fin bit set, Opcode 1 (Text)
+            var frame = Data([0x81])
+            let length = data.count
+            if length <= 125 {
+                frame.append(UInt8(length))
+            } else if length <= 65535 {
+                frame.append(126)
+                var len = UInt16(length).bigEndian
+                frame.append(contentsOf: withUnsafeBytes(of: &len) { Array($0) })
+            } else {
+                frame.append(127)
+                var len = UInt64(length).bigEndian
+                frame.append(contentsOf: withUnsafeBytes(of: &len) { Array($0) })
+            }
+            frame.append(data)
+            cachedFrame = frame
+        }
+        return cachedFrame!
     }
 
     func start() {
@@ -124,8 +169,7 @@ final class ToriServer: ObservableObject, @unchecked Sendable {
         }
 
         if method == "GET" && path == "/downloads" {
-            let json = downloadManager.downloadsAsJSON()
-            sendHttpResponse(json: json, connection: connection)
+            sendHttpResponse(json: getCachedJSON(), connection: connection)
         } else if method == "POST" && path == "/resolve" {
             if let bodyRange = request.range(of: "\r\n\r\n") {
                 let body = String(request[bodyRange.upperBound...])
@@ -173,7 +217,7 @@ final class ToriServer: ObservableObject, @unchecked Sendable {
 
                     print("ToriServer: [Action] Adding download from extension: \(urlString)")
                     downloadManager.addDownload(url: url, fileName: fileName, headers: headers, destinationPath: destinationPath, bypassPlugins: bypassPlugins)
-                    sendHttpResponse(json: "{\"status\": \"ok\"}", connection: connection)
+                    sendHttpResponse(json: Self.okResponse, connection: connection)
                 } else {
                     print("ToriServer: [Error] Failed to parse /add request body")
                     sendHttpResponse(status: "400 Bad Request", json: "{\"error\": \"Invalid JSON\"}", connection: connection)
@@ -196,7 +240,7 @@ final class ToriServer: ObservableObject, @unchecked Sendable {
                     case "/remove": downloadManager.removeDownload(id: id)
                     default: break
                     }
-                    sendHttpResponse(json: "{\"status\": \"ok\"}", connection: connection)
+                    sendHttpResponse(json: Self.okResponse, connection: connection)
                 } else {
                     sendHttpResponse(status: "400 Bad Request", json: "{\"error\": \"Invalid ID\"}", connection: connection)
                 }
@@ -209,30 +253,19 @@ final class ToriServer: ObservableObject, @unchecked Sendable {
     }
 
     private func sendHttpResponse(status: String = "200 OK", json: String, connection: NWConnection) {
-        let response = "HTTP/1.1 \(status)\r\n" +
-                       "Content-Type: application/json\r\n" +
-                       "Content-Length: \(json.utf8.count)\r\n" +
-                       "Access-Control-Allow-Origin: *\r\n" +
-                       "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
-                       "Access-Control-Allow-Headers: Content-Type\r\n" +
-                       "Connection: close\r\n" +
-                       "\r\n" +
-                       json
+        // Use string interpolation with pre-computed parts
+        let contentLength = json.utf8.count
+        let response = "HTTP/1.1 \(status)\r\nContent-Type: application/json\r\nContent-Length: \(contentLength)\r\n\(Self.corsHeaders)Connection: close\r\n\r\n\(json)"
 
-        connection.send(content: response.data(using: .utf8), completion: .contentProcessed({ _ in
+        connection.send(content: Data(response.utf8), completion: .contentProcessed({ _ in
             connection.cancel()
         }))
     }
 
+    private static let corsResponse = Data("HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nAccess-Control-Max-Age: 86400\r\nConnection: close\r\n\r\n".utf8)
+
     private func sendCORSResponse(connection: NWConnection) {
-        let response = "HTTP/1.1 204 No Content\r\n" +
-                       "Access-Control-Allow-Origin: *\r\n" +
-                       "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
-                       "Access-Control-Allow-Headers: Content-Type\r\n" +
-                       "Access-Control-Max-Age: 86400\r\n" +
-                       "Connection: close\r\n" +
-                       "\r\n"
-        connection.send(content: response.data(using: .utf8), completion: .contentProcessed({ _ in
+        connection.send(content: Self.corsResponse, completion: .contentProcessed({ _ in
             connection.cancel()
         }))
     }
@@ -328,27 +361,8 @@ final class ToriServer: ObservableObject, @unchecked Sendable {
     private func broadcastUpdate() {
         guard !connections.isEmpty else { return }
 
-        let json = downloadManager.downloadsAsJSON()
-        let data = json.data(using: .utf8)!
-
-        // Construct WebSocket Text Frame (Server to Client, no masking)
-        // 0x81 = Fin bit set, Opcode 1 (Text)
-        var frame = Data([0x81])
-        let length = data.count
-        if length <= 125 {
-            frame.append(UInt8(length))
-        } else if length <= 65535 {
-            frame.append(126)
-            let len = UInt16(length).bigEndian
-            let lenData = withUnsafeBytes(of: len) { Data($0) }
-            frame.append(lenData)
-        } else {
-            frame.append(127)
-            let len = UInt64(length).bigEndian
-            let lenData = withUnsafeBytes(of: len) { Data($0) }
-            frame.append(lenData)
-        }
-        frame.append(data)
+        // Use cached frame to avoid repeated serialization and frame construction
+        let frame = getCachedFrame()
 
         for (id, connection) in connections {
             connection.send(content: frame, completion: .contentProcessed({ [weak self] error in

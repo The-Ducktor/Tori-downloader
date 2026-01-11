@@ -1,5 +1,5 @@
 /**
- * Tori Extension - Background Script
+ * Tori Extension - Background Script (Optimized)
  *
  * Handles download interception, communication with the Tori macOS app,
  * and maintains a persistent WebSocket connection for real-time updates.
@@ -8,80 +8,141 @@
 const TORI_API_URL = "http://localhost:18121";
 const TORI_WS_URL = "ws://localhost:18121";
 
+// Connection state
 let socket = null;
-let currentDownloads = [];
-let reconnectTimer = null;
 let isConnecting = false;
-const scriptStartTime = Date.now();
+let reconnectTimer = null;
 let socketConnectionTime = null;
-let trackedDownloadIds = new Set(); // Track which downloads we've seen
-let periodicCheckTimer = null;
+
+// Download tracking with size limit
+const MAX_TRACKED_IDS = 500;
+let trackedDownloadIds = new Set();
+let currentDownloads = [];
+
+// Timing
+const scriptStartTime = Date.now();
+const RECONNECT_DELAY = 5000;
+const HEADER_CACHE_TTL = 30000; // 30 seconds
+const HEADER_CLEANUP_THRESHOLD = 100;
 
 console.log("[Tori] Background script initialized");
+
+// Header caching with automatic cleanup
+let headerCacheSize = 0;
+
+function cacheHeaders(url, headers) {
+	const key = `headers_${url}`;
+	chrome.storage.session.set({
+		[key]: {
+			headers,
+			timestamp: Date.now(),
+		},
+	});
+	headerCacheSize++;
+
+	// Cleanup when cache gets large
+	if (headerCacheSize >= HEADER_CLEANUP_THRESHOLD) {
+		cleanupHeaderCache();
+	}
+}
+
+function cleanupHeaderCache() {
+	chrome.storage.session.get(null, (items) => {
+		const now = Date.now();
+		const toRemove = [];
+
+		for (const key of Object.keys(items)) {
+			if (
+				key.startsWith("headers_") &&
+				now - items[key].timestamp > HEADER_CACHE_TTL
+			) {
+				toRemove.push(key);
+			}
+		}
+
+		if (toRemove.length > 0) {
+			chrome.storage.session.remove(toRemove);
+			headerCacheSize = Math.max(0, headerCacheSize - toRemove.length);
+		}
+	});
+}
 
 // Cache request headers for potential downloads
 chrome.webRequest.onBeforeSendHeaders.addListener(
 	(details) => {
 		const headers = {};
-		details.requestHeaders.forEach((h) => {
+		for (const h of details.requestHeaders) {
 			headers[h.name] = h.value;
-		});
-
-		// Store in session storage to survive service worker termination
-		const key = `headers_${details.url}`;
-		chrome.storage.session.set({
-			[key]: {
-				headers,
-				timestamp: Date.now(),
-			},
-		});
-
-		// Periodically cleanup old entries
-		if (Math.random() < 0.05) {
-			chrome.storage.session.get(null, (items) => {
-				const now = Date.now();
-				const toRemove = Object.keys(items).filter(
-					(k) => k.startsWith("headers_") && now - items[k].timestamp > 60000,
-				);
-				if (toRemove.length > 0) chrome.storage.session.remove(toRemove);
-			});
 		}
+		cacheHeaders(details.url, headers);
 	},
 	{ urls: ["<all_urls>"], types: ["main_frame", "sub_frame", "other"] },
 	["requestHeaders"],
 );
 
 /**
+ * Cleanup tracked IDs to prevent unbounded memory growth
+ */
+function pruneTrackedIds() {
+	if (trackedDownloadIds.size > MAX_TRACKED_IDS) {
+		// Keep only IDs that are in currentDownloads
+		const activeIds = new Set(currentDownloads.map((d) => d.id));
+		trackedDownloadIds = activeIds;
+	}
+}
+
+/**
+ * Notify popup of state changes (with error suppression for closed popup)
+ */
+function notifyPopup(data) {
+	chrome.runtime.sendMessage(data).catch(() => {
+		// Popup is closed, ignore
+	});
+}
+
+/**
  * Establishes and maintains a WebSocket connection to the Tori app.
  */
 function connectWebSocket() {
-	if (isConnecting || (socket && socket.readyState === WebSocket.OPEN)) return;
+	if (isConnecting || (socket && socket.readyState === WebSocket.OPEN)) {
+		return;
+	}
 
 	isConnecting = true;
-	console.log("[Tori] Attempting to connect to WebSocket...");
 
+	// Cleanup existing socket
 	if (socket) {
 		socket.onopen = null;
 		socket.onmessage = null;
 		socket.onclose = null;
 		socket.onerror = null;
-		socket.close();
+		try {
+			socket.close();
+		} catch (e) {
+			// Ignore close errors
+		}
+		socket = null;
 	}
 
-	socket = new WebSocket(TORI_WS_URL);
+	console.log("[Tori] Connecting to WebSocket...");
+
+	try {
+		socket = new WebSocket(TORI_WS_URL);
+	} catch (e) {
+		console.error("[Tori] Failed to create WebSocket:", e);
+		isConnecting = false;
+		scheduleReconnect();
+		return;
+	}
 
 	socket.onopen = () => {
 		isConnecting = false;
 		socketConnectionTime = Date.now();
 		console.log("[Tori] WebSocket connected");
+
 		if (reconnectTimer) {
 			clearTimeout(reconnectTimer);
 			reconnectTimer = null;
-		}
-		// Clear periodic check timer when connected
-		if (periodicCheckTimer) {
-			clearInterval(periodicCheckTimer);
-			periodicCheckTimer = null;
 		}
 	};
 
@@ -89,29 +150,38 @@ function connectWebSocket() {
 		try {
 			const data = JSON.parse(event.data);
 			if (Array.isArray(data)) {
-				// Only show downloads that were received after the socket connected
-				// This filters out historical downloads on initial connection
-				const filteredDownloads = data.filter((download) => {
-					// Keep only downloads we haven't tracked yet, or those added after connection
-					if (socketConnectionTime && !trackedDownloadIds.has(download.id)) {
-						// Track this new download
-						trackedDownloadIds.add(download.id);
-						return true;
+				// Filter to only show new downloads or updates to tracked ones
+				const filteredDownloads = [];
+
+				for (const download of data) {
+					if (!trackedDownloadIds.has(download.id)) {
+						// New download - only add if it came after connection
+						if (socketConnectionTime) {
+							trackedDownloadIds.add(download.id);
+							filteredDownloads.push(download);
+						}
+					} else {
+						// Already tracked - include updates
+						filteredDownloads.push(download);
 					}
-					// Always show downloads that were already tracked (updates to existing downloads)
-					return trackedDownloadIds.has(download.id);
-				});
+				}
+
+				// Remove tracked IDs that are no longer in the data
+				const currentIds = new Set(data.map((d) => d.id));
+				for (const id of trackedDownloadIds) {
+					if (!currentIds.has(id)) {
+						trackedDownloadIds.delete(id);
+					}
+				}
 
 				currentDownloads = filteredDownloads;
-				// Broadcast to popup if it's open
-				chrome.runtime
-					.sendMessage({
-						action: "downloadsUpdated",
-						downloads: currentDownloads,
-					})
-					.catch(() => {
-						// Popup is likely closed, ignore
-					});
+				pruneTrackedIds();
+
+				notifyPopup({
+					action: "downloadsUpdated",
+					downloads: currentDownloads,
+					connected: true,
+				});
 			}
 		} catch (err) {
 			console.error("[Tori] Failed to parse WebSocket message:", err);
@@ -122,53 +192,51 @@ function connectWebSocket() {
 		isConnecting = false;
 		socket = null;
 		currentDownloads = [];
-		console.log(
-			`[Tori] WebSocket closed (code: ${event.code}). Retrying in 5s...`,
-		);
+		console.log(`[Tori] WebSocket closed (code: ${event.code})`);
 
-		// Notify popup of disconnection
-		chrome.runtime
-			.sendMessage({
-				action: "downloadsUpdated",
-				downloads: [],
-				connected: false,
-			})
-			.catch(() => {});
+		notifyPopup({
+			action: "downloadsUpdated",
+			downloads: [],
+			connected: false,
+		});
 
-		if (!reconnectTimer) {
-			reconnectTimer = setTimeout(connectWebSocket, 5000);
-		}
-
-		// Start periodic check if not already running
-		if (!periodicCheckTimer) {
-			periodicCheckTimer = setInterval(() => {
-				console.log("[Tori] Periodic connection check (offline)");
-				connectWebSocket();
-			}, 10000);
-		}
+		scheduleReconnect();
 	};
 
-	socket.onerror = (error) => {
-		console.error("[Tori] WebSocket error observed:", error);
-		// onclose will handle the reconnection
+	socket.onerror = () => {
+		// onclose will handle reconnection
+		isConnecting = false;
 	};
 }
 
-// Initial connection attempt
+function scheduleReconnect() {
+	if (!reconnectTimer) {
+		reconnectTimer = setTimeout(() => {
+			reconnectTimer = null;
+			connectWebSocket();
+		}, RECONNECT_DELAY);
+	}
+}
+
+// Initial connection
 connectWebSocket();
 
 /**
  * Intercepts browser downloads and redirects them to Tori.
  */
 chrome.downloads.onCreated.addListener(async (downloadItem) => {
-	// Ignore downloads that were created before the extension started
-	// to prevent re-intercepting old downloads on browser restart.
+	// Ignore old downloads (from before extension started)
 	const downloadStartTime = new Date(downloadItem.startTime).getTime();
 	if (downloadStartTime < scriptStartTime - 5000) {
 		return;
 	}
 
-	// Check if interception is enabled and get settings
+	// Only intercept HTTP/HTTPS
+	if (!downloadItem.url.startsWith("http")) {
+		return;
+	}
+
+	// Get settings
 	const settings = await chrome.storage.local.get([
 		"interceptEnabled",
 		"minInterceptSize",
@@ -177,15 +245,11 @@ chrome.downloads.onCreated.addListener(async (downloadItem) => {
 	]);
 
 	if (settings.interceptEnabled === false) {
-		console.log(
-			"[Tori] Interception disabled, allowing browser to handle download",
-		);
 		return;
 	}
 
-	// Check file size if available (fileSize is -1 if unknown)
-	const minSizeMB =
-		settings.minInterceptSize !== undefined ? settings.minInterceptSize : 50;
+	// Check file size threshold
+	const minSizeMB = settings.minInterceptSize ?? 50;
 	const minSizeBytes = minSizeMB * 1024 * 1024;
 
 	if (
@@ -194,78 +258,74 @@ chrome.downloads.onCreated.addListener(async (downloadItem) => {
 		minSizeMB > 0
 	) {
 		console.log(
-			`[Tori] Skipping small download (${(
-				downloadItem.fileSize / (1024 * 1024)
-			).toFixed(2)}MB < ${minSizeMB}MB)`,
+			`[Tori] Skipping small download (${(downloadItem.fileSize / (1024 * 1024)).toFixed(1)}MB)`,
 		);
 		return;
 	}
 
-	// Only intercept HTTP/HTTPS downloads
-	if (downloadItem.url.startsWith("http")) {
-		console.log("[Tori] Intercepting download:", downloadItem.url);
+	console.log("[Tori] Intercepting:", downloadItem.url);
 
-		// Retrieve cached headers from session storage
-		const key = `headers_${downloadItem.url}`;
-		const storageResult = await chrome.storage.session.get([key]);
-		const cached = storageResult[key] || { headers: {} };
-		const headers = { ...cached.headers };
+	// Get cached headers
+	const key = `headers_${downloadItem.url}`;
+	const storageResult = await chrome.storage.session.get([key]);
+	const cached = storageResult[key] || { headers: {} };
+	const headers = { ...cached.headers };
 
-		// Ensure cookies are up to date
+	// Add cookies
+	try {
 		const cookies = await chrome.cookies.getAll({ url: downloadItem.url });
 		if (cookies.length > 0) {
 			headers["Cookie"] = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
 		}
-
-		// Add basic metadata if missing
-		if (!headers["User-Agent"]) headers["User-Agent"] = navigator.userAgent;
-		if (!headers["Referer"] && downloadItem.referrer)
-			headers["Referer"] = downloadItem.referrer;
-
-		// Cancel the browser's internal download
-		chrome.downloads.cancel(downloadItem.id, () => {
-			if (chrome.runtime.lastError) {
-				console.error(
-					"[Tori] Error canceling browser download:",
-					chrome.runtime.lastError,
-				);
-				return;
-			}
-
-			console.log(
-				"[Tori] Browser download canceled, forwarding to Tori app...",
-			);
-			sendToTori(
-				downloadItem.url,
-				downloadItem.filename,
-				headers,
-				settings.bypassPlugins || false,
-				settings.savePath || null,
-			);
-		});
+	} catch (e) {
+		// Cookie access may fail, continue without
 	}
+
+	// Ensure basic headers
+	if (!headers["User-Agent"]) {
+		headers["User-Agent"] = navigator.userAgent;
+	}
+	if (!headers["Referer"] && downloadItem.referrer) {
+		headers["Referer"] = downloadItem.referrer;
+	}
+
+	// Cancel browser download
+	chrome.downloads.cancel(downloadItem.id, () => {
+		if (chrome.runtime.lastError) {
+			console.error("[Tori] Cancel error:", chrome.runtime.lastError);
+			return;
+		}
+
+		sendToTori(
+			downloadItem.url,
+			downloadItem.filename,
+			headers,
+			settings.bypassPlugins || false,
+			settings.savePath || null,
+		);
+	});
 });
 
 /**
- * Sends download metadata to the Tori local server.
+ * Sends download to Tori app
  */
 async function sendToTori(
 	url,
 	fileName,
-	headers = {},
-	bypassPlugins = false,
-	destinationPath = null,
+	headers,
+	bypassPlugins,
+	destinationPath,
 ) {
 	try {
 		const response = await fetch(`${TORI_API_URL}/add`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
-				url: url,
+				url,
 				fileName: fileName ? fileName.split(/[\\/]/).pop() : null,
-				headers: headers,
-				bypassPlugins: bypassPlugins,
-				destinationPath: destinationPath,
+				headers,
+				bypassPlugins,
+				destinationPath,
 			}),
 		});
 
@@ -273,67 +333,44 @@ async function sendToTori(
 			throw new Error(`Server responded with ${response.status}`);
 		}
 
-		console.log("[Tori] Successfully sent download to app");
-
-		if (chrome.notifications) {
-			chrome.notifications.create(
-				{
-					type: "basic",
-					iconUrl: "icons/icon128.png",
-					title: "Tori Intercepted",
-					message: `Started: ${fileName || url}`,
-					priority: 1,
-				},
-				(notificationId) => {
-					if (chrome.runtime.lastError) {
-						console.error(
-							"[Tori] Failed to create notification:",
-							chrome.runtime.lastError,
-						);
-					} else {
-						console.log("[Tori] Notification created:", notificationId);
-					}
-				},
-			);
-		}
+		console.log("[Tori] Download sent successfully");
+		showNotification("Tori Intercepted", `Started: ${fileName || url}`);
 	} catch (error) {
-		console.error("[Tori] Failed to send download to app:", error);
-
-		if (chrome.notifications) {
-			chrome.notifications.create(
-				{
-					type: "basic",
-					iconUrl: "icons/icon128.png",
-					title: "Tori Connection Error",
-					message: "Could not reach the Tori app. Is it running?",
-					priority: 2,
-				},
-				(notificationId) => {
-					if (chrome.runtime.lastError) {
-						console.error(
-							"[Tori] Failed to create notification:",
-							chrome.runtime.lastError,
-						);
-					} else {
-						console.log("[Tori] Error notification created:", notificationId);
-					}
-				},
-			);
-		}
+		console.error("[Tori] Failed to send download:", error);
+		showNotification(
+			"Tori Connection Error",
+			"Could not reach the Tori app. Is it running?",
+			2,
+		);
 	}
 }
 
+function showNotification(title, message, priority = 1) {
+	if (!chrome.notifications) return;
+
+	chrome.notifications
+		.create({
+			type: "basic",
+			iconUrl: "icons/icon128.png",
+			title,
+			message,
+			priority,
+		})
+		.catch(() => {
+			// Notification may fail, ignore
+		});
+}
+
 /**
- * Handles messages from the popup UI.
+ * Handle messages from popup
  */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 	if (request.action === "getDownloads") {
-		const isConnected = socket && socket.readyState === WebSocket.OPEN;
 		sendResponse({
 			success: true,
 			downloads: currentDownloads,
-			connected: isConnected,
+			connected: socket && socket.readyState === WebSocket.OPEN,
 		});
 	}
-	return true; // Keep channel open for async response
+	return true;
 });

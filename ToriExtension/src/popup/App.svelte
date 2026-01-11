@@ -60,31 +60,44 @@
         showAllDownloads ? downloads : activeDownloads,
     );
 
+    // Avoid unnecessary array allocations
+    const emptyArray: DownloadItem[] = [];
+
     const refreshState = async () => {
         try {
             const response = await chrome.runtime.sendMessage({
                 action: "getDownloads",
             });
-            if (response && response.success) {
-                isConnected = response.connected;
-                downloads = response.downloads || [];
+            if (response?.success) {
+                isConnected = response.connected ?? false;
+                // Only update if data actually changed
+                const newDownloads = response.downloads || emptyArray;
+                if (
+                    JSON.stringify(newDownloads) !== JSON.stringify(downloads)
+                ) {
+                    downloads = newDownloads;
+                }
             } else {
                 isConnected = false;
             }
-        } catch (error) {
+        } catch {
             isConnected = false;
         }
     };
 
     onMount(() => {
         refreshState();
-        const interval = setInterval(refreshState, 1000);
+        // Reduced polling interval - WebSocket handles real-time updates
+        const interval = setInterval(refreshState, 2000);
 
-        const messageListener = (message: any) => {
+        const messageListener = (message: {
+            action: string;
+            connected?: boolean;
+            downloads?: DownloadItem[];
+        }) => {
             if (message.action === "downloadsUpdated") {
-                isConnected =
-                    message.connected !== undefined ? message.connected : true;
-                downloads = message.downloads || [];
+                isConnected = message.connected ?? true;
+                downloads = message.downloads || emptyArray;
             }
         };
         chrome.runtime.onMessage.addListener(messageListener);
@@ -148,12 +161,14 @@
         chrome.storage.local.set({ [key]: value });
     };
 
-    const formatBytes = (bytes: number) => {
-        if (!bytes || bytes === 0) return "";
-        const k = 1024;
-        const sizes = ["B", "KB", "MB", "GB", "TB"];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / k ** i).toFixed(1)) + " " + sizes[i];
+    // Pre-compute constants for formatBytes
+    const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
+    const LOG_1024 = Math.log(1024);
+
+    const formatBytes = (bytes: number): string => {
+        if (!bytes) return "";
+        const i = Math.floor(Math.log(bytes) / LOG_1024);
+        return `${(bytes / 1024 ** i).toFixed(1)} ${BYTE_UNITS[i]}`;
     };
 
     const handleManualAdd = async () => {
@@ -574,7 +589,7 @@
 <!-- Download List -->
 <div class="download-list">
     {#if displayedDownloads.length > 0}
-        {#each displayedDownloads.slice().reverse() as item (item.id)}
+        {#each displayedDownloads.toReversed() as item (item.id)}
             <div
                 class="download-item group"
                 class:completed={item.status === "completed"}

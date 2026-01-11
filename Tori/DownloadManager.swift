@@ -3,17 +3,72 @@ import Combine
 
 // DownloadManager handles the lifecycle of file downloads and plugin processing.
 
+// MARK: - Shared Formatters (avoid repeated allocations)
+@MainActor
+private enum SharedFormatters {
+    static let byteFormatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.allowedUnits = [.useKB, .useMB, .useGB]
+        f.countStyle = .file
+        return f
+    }()
+
+    static let timeFormatter: DateComponentsFormatter = {
+        let f = DateComponentsFormatter()
+        f.allowedUnits = [.hour, .minute, .second]
+        f.unitsStyle = .abbreviated
+        f.maximumUnitCount = 2
+        return f
+    }()
+}
+
 @MainActor
 class DownloadManager: NSObject, ObservableObject {
-    @Published var downloads: [DownloadItem] = [] {
-        didSet { notifyUpdate() }
-    }
+    @Published var downloads: [DownloadItem] = []
+
+    // Batch update support
+    private var isBatchUpdating = false
+    private var needsNotify = false
 
     var onUpdate: (() -> Void)?
 
+    // Cached JSON for WebSocket broadcasts
+    private var cachedJSON: String?
+    private var jsonIsDirty = true
+
     private func notifyUpdate() {
+        jsonIsDirty = true
+        if isBatchUpdating {
+            needsNotify = true
+            return
+        }
         objectWillChange.send()
         onUpdate?()
+    }
+
+    /// Perform multiple updates without triggering observers until complete
+    func batchUpdate(_ block: () -> Void) {
+        isBatchUpdating = true
+        needsNotify = false
+        block()
+        isBatchUpdating = false
+        if needsNotify {
+            objectWillChange.send()
+            onUpdate?()
+        }
+    }
+
+    func appendDownload(_ item: DownloadItem) {
+        downloads.append(item)
+        notifyUpdate()
+    }
+
+    func removeDownloads(where predicate: (DownloadItem) -> Bool) {
+        let countBefore = downloads.count
+        downloads.removeAll(where: predicate)
+        if downloads.count != countBefore {
+            notifyUpdate()
+        }
     }
 
     private var session: URLSession!
@@ -62,7 +117,7 @@ class DownloadManager: NSObject, ObservableObject {
             item.iconURL = URL(string: "https://icons.bitwarden.eu/\(host)/icon.png")
         }
 
-        downloads.append(item)
+        appendDownload(item)
 
         if bypassPlugins {
             startDownload(item: item)
@@ -74,7 +129,7 @@ class DownloadManager: NSObject, ObservableObject {
             let results = await PluginManager.shared.processURL(url)
 
             guard !results.isEmpty else {
-                downloads.removeAll { $0.id == item.id }
+                removeDownloads { $0.id == item.id }
                 return
             }
 
@@ -104,30 +159,32 @@ class DownloadManager: NSObject, ObservableObject {
 
                 // Prevent re-downloading if already completed or in progress (check other items)
                 if downloads.contains(where: { $0.id != item.id && $0.url == item.url && ($0.status == .downloading || $0.status == .completed) }) {
-                    downloads.removeAll { $0.id == item.id }
+                    removeDownloads { $0.id == item.id }
                     return
                 }
 
                 startDownload(item: item)
             } else {
                 // Multiple files found - remove the placeholder and add all of them
-                downloads.removeAll { $0.id == item.id }
+                batchUpdate {
+                    removeDownloads { $0.id == item.id }
 
-                for result in results {
-                    let newItem = DownloadItem(url: result.url)
-                    newItem.suggestedFileName = result.fileName
-                    newItem.headers = result.headers
-                    if let pIcon = result.iconURL {
-                        newItem.iconURL = URL(string: pIcon)
-                    }
+                    for result in results {
+                        let newItem = DownloadItem(url: result.url)
+                        newItem.suggestedFileName = result.fileName
+                        newItem.headers = result.headers
+                        if let pIcon = result.iconURL {
+                            newItem.iconURL = URL(string: pIcon)
+                        }
 
-                    // Set reprocessOnResume flag from plugin context
-                    newItem.reprocessOnResume = result.context?.reprocessOnResume ?? false
+                        // Set reprocessOnResume flag from plugin context
+                        newItem.reprocessOnResume = result.context?.reprocessOnResume ?? false
 
-                    // Prevent re-downloading
-                    if !downloads.contains(where: { $0.url == newItem.url && ($0.status == .downloading || $0.status == .completed) }) {
-                        downloads.append(newItem)
-                        startDownload(item: newItem)
+                        // Prevent re-downloading
+                        if !downloads.contains(where: { $0.url == newItem.url && ($0.status == .downloading || $0.status == .completed) }) {
+                            downloads.append(newItem)
+                            startDownload(item: newItem)
+                        }
                     }
                 }
             }
@@ -275,10 +332,9 @@ class DownloadManager: NSObject, ObservableObject {
     }
 
     func removeDownload(id: UUID) {
-        if let index = downloads.firstIndex(where: { $0.id == id }) {
-            let item = downloads[index]
+        if let item = downloads.first(where: { $0.id == id }) {
             item.task?.cancel()
-            downloads.remove(at: index)
+            removeDownloads { $0.id == id }
         }
     }
 
@@ -305,10 +361,7 @@ class DownloadManager: NSObject, ObservableObject {
     }
 
     private func formatBytesPerSecond(_ bytesPerSecond: Double) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useKB, .useMB, .useGB]
-        formatter.countStyle = .file
-        return "\(formatter.string(fromByteCount: Int64(bytesPerSecond)))/s"
+        "\(SharedFormatters.byteFormatter.string(fromByteCount: Int64(bytesPerSecond)))/s"
     }
 
     // MARK: - Helpers
@@ -435,14 +488,21 @@ class DownloadItem: ObservableObject, Identifiable {
     var headers: [String: String]?
     var reprocessOnResume: Bool = false
 
-    @Published var status: Status = .pending
-    @Published var progress: Double = 0
-    @Published var error: Error?
-    @Published var speed: String = "0 KB/s"
-    @Published var timeRemaining: String = ""
-    @Published var totalBytes: Int64 = 0
-    @Published var bytesWritten: Int64 = 0
-    @Published var currentSpeedBytesPerSecond: Double = 0
+    // Use single @Published for batch efficiency
+    @Published private(set) var lastUpdate = Date()
+
+    var status: Status = .pending { didSet { if status != oldValue { signalUpdate() } } }
+    var progress: Double = 0
+    var error: Error?
+    var speed: String = "0 KB/s"
+    var timeRemaining: String = ""
+    var totalBytes: Int64 = 0
+    var bytesWritten: Int64 = 0
+    var currentSpeedBytesPerSecond: Double = 0
+
+    private func signalUpdate() {
+        lastUpdate = Date()
+    }
 
     var task: URLSessionDownloadTask?
     var localURL: URL?
@@ -473,6 +533,7 @@ class DownloadItem: ObservableObject, Identifiable {
         let now = Date()
         let timeInterval = now.timeIntervalSince(lastSpeedUpdateTime)
 
+        // Only recalculate speed every 0.8 seconds to reduce CPU
         if timeInterval >= 0.8 {
             let bytesDownloaded = bytesWritten - lastBytesWritten
             let bytesPerSecond = Double(bytesDownloaded) / timeInterval
@@ -494,25 +555,19 @@ class DownloadItem: ObservableObject, Identifiable {
 
             lastBytesWritten = bytesWritten
             lastSpeedUpdateTime = now
+            signalUpdate()
             return true
         }
         return false
     }
 
     func formatBytesPerSecond(_ bytesPerSecond: Double) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useKB, .useMB, .useGB]
-        formatter.countStyle = .file
-        return "\(formatter.string(fromByteCount: Int64(bytesPerSecond)))/s"
+        "\(SharedFormatters.byteFormatter.string(fromByteCount: Int64(bytesPerSecond)))/s"
     }
 
     func formatTimeInterval(_ interval: TimeInterval) -> String {
         if interval.isInfinite || interval.isNaN { return "" }
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.hour, .minute, .second]
-        formatter.unitsStyle = .abbreviated
-        formatter.maximumUnitCount = 2
-        return formatter.string(from: interval) ?? ""
+        return SharedFormatters.timeFormatter.string(from: interval) ?? ""
     }
 
     var displayName: String {

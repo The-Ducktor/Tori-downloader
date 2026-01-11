@@ -862,20 +862,8 @@ struct PluginsListView: View {
 // MARK: - Preview
 
 #Preview {
-    let manager = DownloadManager()
-    // Example downloads for preview
-    let url1 = URL(string: "https://example.com/file1.zip")!
-    let item1 = DownloadItem(url: url1)
-    item1.status = .downloading
-    item1.progress = 0.65
-    item1.speed = "1.2 MB/s"
+    @Previewable @StateObject var manager = DownloadManager()
 
-    let url2 = URL(string: "https://example.com/document.pdf")!
-    let item2 = DownloadItem(url: url2)
-    item2.status = .completed
-
-    manager.downloads = [item1, item2]
-
-    return DownloadManagerView()
+    DownloadManagerView()
         .environmentObject(manager)
 }
