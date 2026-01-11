@@ -487,6 +487,7 @@ class DownloadItem: ObservableObject, Identifiable {
     var iconURL: URL?
     var headers: [String: String]?
     var reprocessOnResume: Bool = false
+    let dateAdded = Date()
 
     // Use single @Published for batch efficiency
     @Published private(set) var lastUpdate = Date()
@@ -631,7 +632,8 @@ class DownloadItem: ObservableObject, Identifiable {
             "statusText": statusText,
             "progressText": progressText,
             "sizeText": sizeText,
-            "totalSizeText": totalSizeText
+            "totalSizeText": totalSizeText,
+            "dateAdded": dateAdded.timeIntervalSince1970 * 1000 // Queue in milliseconds for JS comparison
         ]
         if let error = error {
             dict["error"] = error.localizedDescription

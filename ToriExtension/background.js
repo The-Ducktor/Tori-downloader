@@ -150,32 +150,16 @@ function connectWebSocket() {
 		try {
 			const data = JSON.parse(event.data);
 			if (Array.isArray(data)) {
-				// Filter to only show new downloads or updates to tracked ones
-				const filteredDownloads = [];
+				// Filter to only show new downloads (added after extension started)
+				// We use a small grace period (5s) for clock differences
+				const threshold = scriptStartTime - 5000;
 
-				for (const download of data) {
-					if (!trackedDownloadIds.has(download.id)) {
-						// New download - only add if it came after connection
-						if (socketConnectionTime) {
-							trackedDownloadIds.add(download.id);
-							filteredDownloads.push(download);
-						}
-					} else {
-						// Already tracked - include updates
-						filteredDownloads.push(download);
-					}
-				}
-
-				// Remove tracked IDs that are no longer in the data
-				const currentIds = new Set(data.map((d) => d.id));
-				for (const id of trackedDownloadIds) {
-					if (!currentIds.has(id)) {
-						trackedDownloadIds.delete(id);
-					}
-				}
+				const filteredDownloads = data.filter(d => {
+					const dateAdded = d.dateAdded || 0;
+					return dateAdded >= threshold;
+				});
 
 				currentDownloads = filteredDownloads;
-				pruneTrackedIds();
 
 				notifyPopup({
 					action: "downloadsUpdated",

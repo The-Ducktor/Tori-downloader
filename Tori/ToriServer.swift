@@ -35,6 +35,7 @@ final class ToriServer: ObservableObject, @unchecked Sendable {
         self.downloadManager.onUpdate = { [weak self] in
             MainActor.assumeIsolated {
                 self?.jsonIsDirty = true
+                self?.cachedFrame = nil
                 self?.scheduleUpdate()
             }
         }

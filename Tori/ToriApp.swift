@@ -1,24 +1,31 @@
 import SwiftUI
 
-@main
-struct ToriApp: App {
-    @StateObject private var downloadManager: DownloadManager
-    @StateObject private var server: ToriServer
+@MainActor
+class AppModel: ObservableObject {
+    let downloadManager: DownloadManager
+    let server: ToriServer
 
     init() {
         let manager = DownloadManager()
-        let server = ToriServer(downloadManager: manager)
-        _downloadManager = StateObject(wrappedValue: manager)
-        _server = StateObject(wrappedValue: server)
-        server.start()
+        self.downloadManager = manager
+        self.server = ToriServer(downloadManager: manager)
+        
+        // Start server immediately upon AppModel creation (which happens once at app launch)
+        self.server.start()
     }
+}
+
+@main
+struct ToriApp: App {
+    // StateObject ensures AppModel is created only once and persists for the app's lifetime
+    @StateObject private var appModel = AppModel()
 
     var body: some Scene {
         Window("Tori", id: "main") {
             DownloadManagerView()
-                .environmentObject(downloadManager)
+                .environmentObject(appModel.downloadManager)
                 .onOpenURL { url in
-                    downloadManager.handleURL(url)
+                    appModel.downloadManager.handleURL(url)
                 }
                 .frame(minWidth: 800, minHeight: 500)
         }
@@ -31,7 +38,7 @@ struct ToriApp: App {
 
         Window("Add Downloads", id: "add-download") {
             AddDownloadView()
-                .environmentObject(downloadManager)
+                .environmentObject(appModel.downloadManager)
                 .frame(minWidth: 500, minHeight: 400)
         }
         .defaultSize(width: 500, height: 400)
@@ -52,9 +59,9 @@ struct ToriApp: App {
         .windowToolbarStyle(.unified)
 
         MenuBarExtra {
-            MenuBarExtraView(manager: downloadManager)
+            MenuBarExtraView(manager: appModel.downloadManager)
         } label: {
-            let activeCount = downloadManager.downloads.filter { $0.status == .downloading || $0.status == .processing }.count
+            let activeCount = appModel.downloadManager.downloads.filter { $0.status == .downloading || $0.status == .processing }.count
             Image(systemName: activeCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle")
         }
         .menuBarExtraStyle(.window)
