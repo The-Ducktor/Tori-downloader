@@ -3,8 +3,6 @@ import SwiftUI
 struct MenuBarExtraView: View {
     @ObservedObject var manager: DownloadManager
     @Environment(\.openWindow) private var openWindow
-    @State private var isShowingAddDownload = false
-    @State private var isShowingPlugins = false
     @State private var showAllDownloads = false
 
     var body: some View {
@@ -14,7 +12,7 @@ struct MenuBarExtraView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Toolbar
             HStack(spacing: 8) {
-                Button(action: { isShowingAddDownload = true }) {
+                Button(action: openAddDownload) {
                     Image(systemName: "plus.circle.fill")
                 }
                 .buttonStyle(.borderless)
@@ -64,6 +62,7 @@ struct MenuBarExtraView: View {
                         .multilineTextAlignment(.center)
                 }
                 .padding(.vertical, 32)
+                .padding(.horizontal, 16)
                 .frame(minWidth: 280)
             } else {
                 ScrollView {
@@ -91,7 +90,7 @@ struct MenuBarExtraView: View {
                 .buttonStyle(.borderless)
                 .help("Open Tori Window")
 
-                Button(action: { isShowingPlugins = true }) {
+                Button(action: openPlugins) {
                     Image(systemName: "puzzlepiece.extension")
                 }
                 .buttonStyle(.borderless)
@@ -122,14 +121,6 @@ struct MenuBarExtraView: View {
         }
         .background(Color(.windowBackgroundColor))
         .frame(width: 340)
-        .sheet(isPresented: $isShowingAddDownload) {
-            AddDownloadView()
-                .environmentObject(manager)
-                .frame(minWidth: 400, minHeight: 200)
-        }
-        .sheet(isPresented: $isShowingPlugins) {
-            PluginsListView()
-        }
     }
 
     private func clearCompleted() {
@@ -138,6 +129,16 @@ struct MenuBarExtraView: View {
 
     private func openMainWindow() {
         openWindow(id: "main")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    private func openAddDownload() {
+        openWindow(id: "add-download")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    private func openPlugins() {
+        openWindow(id: "plugins")
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 }
@@ -242,8 +243,8 @@ struct MenuBarDownloadRow: View {
                 .buttonStyle(PlainButtonStyle())
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(isHovered ? Color.accentColor.opacity(0.05) : Color.clear)
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {

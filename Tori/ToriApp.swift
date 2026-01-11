@@ -26,6 +26,24 @@ struct ToriApp: App {
         }
         .defaultLaunchBehavior(.suppressed)
 
+        Window("Add Downloads", id: "add-download") {
+            AddDownloadView()
+                .environmentObject(downloadManager)
+                .frame(minWidth: 500, minHeight: 400)
+        }
+        .defaultSize(width: 500, height: 400)
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+        .keyboardShortcut("n", modifiers: .command)
+
+        Window("Plugins", id: "plugins") {
+            PluginsListView()
+                .frame(minWidth: 500, minHeight: 400)
+        }
+        .defaultSize(width: 600, height: 500)
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+
         MenuBarExtra {
             MenuBarExtraView(manager: downloadManager)
         } label: {
