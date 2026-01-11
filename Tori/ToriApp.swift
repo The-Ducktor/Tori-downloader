@@ -20,11 +20,14 @@ struct ToriApp: App {
                 .onOpenURL { url in
                     downloadManager.handleURL(url)
                 }
+                .frame(minWidth: 800, minHeight: 500)
         }
         .commands {
             CommandGroup(replacing: .newItem) { }
         }
         .defaultLaunchBehavior(.suppressed)
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified)
 
         Window("Add Downloads", id: "add-download") {
             AddDownloadView()
@@ -35,6 +38,8 @@ struct ToriApp: App {
         .windowResizability(.contentSize)
         .defaultPosition(.center)
         .keyboardShortcut("n", modifiers: .command)
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified)
 
         Window("Plugins", id: "plugins") {
             PluginsListView()
@@ -43,6 +48,8 @@ struct ToriApp: App {
         .defaultSize(width: 600, height: 500)
         .windowResizability(.contentSize)
         .defaultPosition(.center)
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified)
 
         MenuBarExtra {
             MenuBarExtraView(manager: downloadManager)

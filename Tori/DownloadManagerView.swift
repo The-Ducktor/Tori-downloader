@@ -16,7 +16,7 @@ struct DownloadManagerView: View {
             }
             .navigationTitle("Downloads")
             .toolbar {
-                ToolbarItemGroup(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .automatic) {
                     Button("Clear Completed") {
                         clearCompleted()
                     }
@@ -30,6 +30,7 @@ struct DownloadManagerView: View {
                     Button(action: { isShowingAddDownloadSheet = true }) {
                         Image(systemName: "plus")
                     }
+                    .help("Add Download")
                 }
             }
             .sheet(isPresented: $isShowingAddDownloadSheet) {
@@ -40,6 +41,7 @@ struct DownloadManagerView: View {
                 PluginsListView()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Subviews
@@ -150,17 +152,30 @@ struct AddDownloadView: View {
     @FocusState private var isUrlInputFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            switch viewState {
-            case .input:
-                inputView
-            case .processing:
-                processingView
-            case .selection(let results):
-                selectionView(results: results)
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    switch viewState {
+                    case .input:
+                        inputView
+                    case .processing:
+                        processingView
+                    case .selection(let results):
+                        selectionView(results: results)
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Add Downloads")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
             }
         }
-        .frame(width: 500)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             isUrlInputFocused = true
             checkClipboard()
@@ -174,20 +189,6 @@ struct AddDownloadView: View {
 
     private var inputView: some View {
         VStack(alignment: .leading, spacing: 20) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Add Downloads")
-                        .font(.title2)
-                        .fontWeight(.bold)
-                    Text("Enter one or more URLs to start downloading")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                Image(systemName: "arrow.down.circle.fill")
-                    .font(.system(size: 32))
-                    .foregroundColor(.accentColor)
-            }
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("URLs")
@@ -722,35 +723,22 @@ struct PluginsListView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Installed Plugins")
-                    .font(.headline)
-                Spacer()
-                Button("Done") {
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .padding()
-            .background(Color(NSColor.windowBackgroundColor))
-
-            Divider()
-
-            if pluginManager.loadedPlugins.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "puzzlepiece")
-                        .font(.system(size: 48))
-                        .foregroundColor(.secondary)
-                    Text("No Plugins Loaded")
-                        .font(.title3)
-                    Text("Add plugin folders with a manifest.json to extend Tori.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List(pluginManager.loadedPlugins) { plugin in
+        NavigationStack {
+            VStack(spacing: 0) {
+                if pluginManager.loadedPlugins.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "puzzlepiece")
+                            .font(.system(size: 48))
+                            .foregroundColor(.secondary)
+                        Text("No Plugins Loaded")
+                            .font(.title3)
+                        Text("Add plugin folders with a manifest.json to extend Tori.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(pluginManager.loadedPlugins) { plugin in
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: plugin.isEnabled ? "puzzlepiece.fill" : "puzzlepiece")
                             .font(.title2)
@@ -819,26 +807,35 @@ struct PluginsListView: View {
                         Spacer()
                     }
                     .padding(.vertical, 8)
+                    }
+                }
+
+                Divider()
+
+                HStack {
+                    Button("Open Plugins Folder") {
+                        openPluginsFolder()
+                    }
+                    .buttonStyle(.link)
+                    Spacer()
+                    Button("Reload Plugins") {
+                        pluginManager.loadPlugins()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.accentColor)
+                }
+                .padding()
+            }
+            .navigationTitle("Plugins")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
                 }
             }
-
-            Divider()
-
-            HStack {
-                Button("Open Plugins Folder") {
-                    openPluginsFolder()
-                }
-                .buttonStyle(.link)
-                Spacer()
-                Button("Reload Plugins") {
-                    pluginManager.loadPlugins()
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(.accentColor)
-            }
-            .padding()
         }
-        .frame(width: 400, height: 500)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func cleanPattern(_ pattern: String) -> String {
