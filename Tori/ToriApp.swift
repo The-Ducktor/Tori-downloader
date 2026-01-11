@@ -14,13 +14,17 @@ struct ToriApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        Window("Tori", id: "main") {
             DownloadManagerView()
                 .environmentObject(downloadManager)
                 .onOpenURL { url in
                     downloadManager.handleURL(url)
                 }
         }
+        .commands {
+            CommandGroup(replacing: .newItem) { }
+        }
+        .defaultLaunchBehavior(.suppressed)
 
         MenuBarExtra {
             MenuBarExtraView(manager: downloadManager)

@@ -45,6 +45,20 @@
     let addBypassPlugins = $state(false);
     let discoveredFiles = $state<PluginActionResult[]>([]);
     let selectedFileUrls = $state<Set<string>>(new Set());
+    let showAllDownloads = $state(false);
+
+    const activeDownloads = $derived(
+        downloads.filter(
+            (d) =>
+                d.status === "downloading" ||
+                d.status === "processing" ||
+                d.status === "paused",
+        ),
+    );
+
+    const displayedDownloads = $derived(
+        showAllDownloads ? downloads : activeDownloads,
+    );
 
     const refreshState = async () => {
         try {
@@ -273,58 +287,70 @@
             console.error(`Failed to ${endpoint}:`, err);
         }
     };
+
+    const clearCompleted = async () => {
+        const completedIds = downloads
+            .filter((d) => d.status === "completed")
+            .map((d) => d.id);
+        for (const id of completedIds) {
+            await handleAction(id, "/remove");
+        }
+    };
 </script>
 
-<div class="header">
-    <h1>Tori</h1>
-    <div class="header-actions">
-        <div class="connection-status">
-            <span class="status-dot" class:online={isConnected}></span>
-            <span>{isConnected ? "Online" : "Offline"}</span>
-        </div>
-        <button
-            class="icon-btn"
-            onclick={() => togglePanel("add")}
-            title="Add Download"
+<!-- Toolbar -->
+<div class="toolbar">
+    <button
+        class="icon-btn"
+        onclick={() => togglePanel("add")}
+        title="Add Download"
+    >
+        <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
         >
-            <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-            >
-                <line x1="12" y1="5" x2="12" y2="19"></line>
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+    </button>
+
+    {#if activeDownloads.length > 0}
+        <span class="active-badge">{activeDownloads.length} active</span>
+    {/if}
+
+    <div
+        class="status-indicator"
+        class:online={isConnected}
+        title={isConnected ? "Connected" : "Disconnected"}
+    ></div>
+
+    <div class="spacer"></div>
+
+    <div class="toggle-group">
+        <button
+            class="toggle-btn"
+            class:active={!showAllDownloads}
+            onclick={() => (showAllDownloads = false)}
+        >
+            Active
         </button>
         <button
-            class="icon-btn"
-            onclick={() => togglePanel("settings")}
-            title="Settings"
+            class="toggle-btn"
+            class:active={showAllDownloads}
+            onclick={() => (showAllDownloads = true)}
         >
-            <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-            >
-                <circle cx="12" cy="12" r="3"></circle>
-                <path
-                    d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
-                ></path>
-            </svg>
+            All
         </button>
     </div>
 </div>
 
+<!-- Add Panel -->
 <div class="panel" class:open={activePanel === "add"}>
     <div class="panel-content">
         {#if addState === "input"}
@@ -366,14 +392,16 @@
                     onclick={handleManualAdd}
                     disabled={!manualUrls.trim()}
                 >
-                    Add Downloads
+                    Add
                 </button>
             </div>
         {:else if addState === "processing"}
-            <div class="flex flex-col items-center py-8 gap-3">
-                <div class="status-dot online w-3 h-3 animate-pulse"></div>
+            <div class="flex flex-col items-center py-6 gap-3">
+                <div
+                    class="status-indicator online w-3 h-3 animate-pulse"
+                ></div>
                 <span class="text-xs font-medium text-text-primary"
-                    >Resolving links...</span
+                    >Resolving...</span
                 >
             </div>
         {:else if addState === "selection"}
@@ -381,13 +409,13 @@
                 <div class="flex justify-between items-center">
                     <div class="flex items-center gap-2">
                         <button
-                            class="icon-btn p-1"
+                            class="icon-btn small"
                             onclick={() => (addState = "input")}
                             title="Back"
                         >
                             <svg
-                                width="14"
-                                height="14"
+                                width="12"
+                                height="12"
                                 viewBox="0 0 24 24"
                                 fill="none"
                                 stroke="currentColor"
@@ -407,7 +435,7 @@
                     </div>
                     <div class="flex gap-1">
                         <button
-                            class="text-[9px] px-2 py-0.5 bg-white/5 hover:bg-white/10 rounded border border-border transition-colors"
+                            class="mini-btn"
                             onclick={() =>
                                 (selectedFileUrls = new Set(
                                     discoveredFiles.map((f) => f.url),
@@ -416,19 +444,17 @@
                             All
                         </button>
                         <button
-                            class="text-[9px] px-2 py-0.5 bg-white/5 hover:bg-white/10 rounded border border-border transition-colors"
+                            class="mini-btn"
                             onclick={() => (selectedFileUrls = new Set())}
                         >
                             None
                         </button>
                     </div>
                 </div>
-                <div
-                    class="max-h-[140px] overflow-y-auto flex flex-col gap-1 border border-border rounded-md p-1 bg-bg/50"
-                >
+                <div class="file-selection-list">
                     {#each discoveredFiles as file}
                         <div
-                            class="flex items-start gap-2 p-2 bg-white/[0.02] hover:bg-white/[0.05] rounded transition-colors cursor-pointer"
+                            class="file-selection-item"
                             onclick={() => toggleFileSelection(file.url)}
                             role="button"
                             tabindex="0"
@@ -487,6 +513,7 @@
     </div>
 </div>
 
+<!-- Settings Panel -->
 <div class="panel" class:open={activePanel === "settings"}>
     <div class="panel-content">
         <div class="row">
@@ -505,7 +532,7 @@
             </label>
         </div>
         <div class="row">
-            <span class="text-text-primary">Min Intercept Size (MB)</span>
+            <span class="text-text-primary">Min Size (MB)</span>
             <input
                 type="number"
                 class="input-field w-[64px] text-center"
@@ -531,7 +558,7 @@
             </label>
         </div>
         <div class="flex flex-col gap-1.5">
-            <span class="text-text-primary">Default Save Path</span>
+            <span class="text-text-primary">Save Path</span>
             <input
                 type="text"
                 class="input-field"
@@ -544,22 +571,26 @@
     </div>
 </div>
 
+<!-- Download List -->
 <div class="download-list">
-    {#if downloads.length > 0}
-        {#each downloads.slice().reverse() as item (item.id)}
-            <div class="download-item group">
+    {#if displayedDownloads.length > 0}
+        {#each displayedDownloads.slice().reverse() as item (item.id)}
+            <div
+                class="download-item group"
+                class:completed={item.status === "completed"}
+            >
                 <div class="file-name" title={item.fileName}>
                     {item.fileName}
                 </div>
-                <div class="progress-container bg-border/30">
+                <div class="progress-container">
                     <div
-                        class="progress-bar shadow-[0_0_8px_rgba(10,132,255,0.3)]"
+                        class="progress-bar"
                         style:width="{(item.progress * 100).toFixed(1)}%"
                     ></div>
                 </div>
                 <div class="meta-info">
                     <span class="font-medium">{item.statusText}</span>
-                    <span class="opacity-80">
+                    <span class="opacity-80 tabular-nums">
                         {item.progressText}
                         {#if (item.status === "downloading" || item.status === "paused") && item.sizeText}
                             • {item.sizeText}
@@ -570,7 +601,7 @@
                     </span>
                 </div>
                 {#if item.status === "downloading"}
-                    <div class="meta-info mt-1 opacity-50 font-mono">
+                    <div class="meta-info mt-1 opacity-50 tabular-nums">
                         <span>{item.speed}</span>
                         <span>{item.timeRemaining} left</span>
                     </div>
@@ -658,12 +689,370 @@
         {/each}
     {:else}
         <div class="empty-state">
-            <div class="empty-icon grayscale opacity-50">🐦</div>
-            <p class="font-medium">
-                {isConnected ? "No active downloads" : "Connecting to Tori..."}
-            </p>
+            <div class="empty-icon">🐦</div>
+            <p>{showAllDownloads ? "No downloads" : "No active downloads"}</p>
         </div>
     {/if}
 </div>
 
-<div class="footer">Tori v1.0 ex ver 0.1</div>
+<!-- Footer -->
+<div class="footer">
+    <button
+        class="footer-btn"
+        onclick={() => togglePanel("settings")}
+        title="Settings"
+    >
+        <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+        >
+            <circle cx="12" cy="12" r="3"></circle>
+            <path
+                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+            ></path>
+        </svg>
+    </button>
+
+    {#if downloads.some((d) => d.status === "completed")}
+        <button
+            class="footer-btn"
+            onclick={clearCompleted}
+            title="Clear Completed"
+        >
+            <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+            >
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path
+                    d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                ></path>
+            </svg>
+        </button>
+    {/if}
+
+    <div class="spacer"></div>
+
+    <span class="footer-version">Tori</span>
+</div>
+
+<style>
+    .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: var(--color-bg);
+        border-bottom: 1px solid var(--color-border-subtle);
+    }
+
+    .icon-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        color: var(--color-text-secondary);
+        border-radius: 6px;
+        transition: var(--transition-fast);
+    }
+
+    .icon-btn:hover {
+        color: var(--color-text-primary);
+        background: rgba(255, 255, 255, 0.08);
+    }
+
+    .icon-btn.small {
+        width: 24px;
+        height: 24px;
+    }
+
+    .active-badge {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--color-accent);
+        background: rgba(10, 132, 255, 0.15);
+        padding: 2px 8px;
+        border-radius: 10px;
+    }
+
+    .status-indicator {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--color-error);
+        transition: var(--transition-smooth);
+    }
+
+    .status-indicator.online {
+        background: var(--color-success);
+        box-shadow: 0 0 8px rgba(52, 199, 89, 0.5);
+    }
+
+    .spacer {
+        flex: 1;
+    }
+
+    .toggle-group {
+        display: flex;
+        background: var(--color-border-subtle);
+        border-radius: 6px;
+        padding: 2px;
+    }
+
+    .toggle-btn {
+        font-size: 10px;
+        font-weight: 500;
+        padding: 4px 10px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        border-radius: 4px;
+        transition: var(--transition-fast);
+    }
+
+    .toggle-btn.active {
+        background: var(--color-card-bg);
+        color: var(--color-text-primary);
+    }
+
+    .toggle-btn:hover:not(.active) {
+        color: var(--color-text-primary);
+    }
+
+    .panel {
+        max-height: 0;
+        overflow: hidden;
+        background: var(--color-card-bg);
+        border-bottom: 1px solid var(--color-border-subtle);
+        transition:
+            max-height 0.3s ease-out,
+            opacity 0.3s ease-out;
+        opacity: 0;
+    }
+
+    .panel.open {
+        max-height: 280px;
+        opacity: 1;
+    }
+
+    .panel-content {
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        font-size: 12px;
+        color: var(--color-text-secondary);
+    }
+
+    .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+
+    .mini-btn {
+        font-size: 9px;
+        padding: 2px 8px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--color-border);
+        border-radius: 4px;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        transition: var(--transition-fast);
+    }
+
+    .mini-btn:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+
+    .file-selection-list {
+        max-height: 120px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        border: 1px solid var(--color-border);
+        border-radius: 6px;
+        padding: 4px;
+        background: rgba(0, 0, 0, 0.2);
+    }
+
+    .file-selection-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.02);
+        border-radius: 4px;
+        cursor: pointer;
+        transition: var(--transition-fast);
+    }
+
+    .file-selection-item:hover {
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    .download-list {
+        flex: 1;
+        max-height: 380px;
+        overflow-y: auto;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .download-item {
+        background: rgba(255, 255, 255, 0.04);
+        border-radius: 10px;
+        padding: 12px;
+        border: 1px solid rgba(66, 66, 69, 0.5);
+        transition: var(--transition-smooth);
+    }
+
+    .download-item:hover {
+        background: rgba(255, 255, 255, 0.06);
+        border-color: var(--color-border-subtle);
+    }
+
+    .download-item.completed {
+        opacity: 0.6;
+    }
+
+    .file-name {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--color-text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-bottom: 8px;
+    }
+
+    .progress-container {
+        height: 4px;
+        background: rgba(66, 66, 69, 0.3);
+        border-radius: 2px;
+        overflow: hidden;
+        margin-bottom: 8px;
+    }
+
+    .progress-bar {
+        height: 100%;
+        background: linear-gradient(
+            to right,
+            var(--color-accent),
+            rgba(10, 132, 255, 0.8)
+        );
+        border-radius: 2px;
+        transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .meta-info {
+        display: flex;
+        justify-content: space-between;
+        font-size: 10px;
+        color: rgba(161, 161, 166, 0.8);
+    }
+
+    .item-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .action-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 6px;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        color: var(--color-text-secondary);
+        border-radius: 6px;
+        transition: var(--transition-smooth);
+    }
+
+    .action-btn:hover {
+        color: var(--color-text-primary);
+        background: rgba(255, 255, 255, 0.1);
+    }
+
+    .action-btn.danger:hover {
+        color: var(--color-error);
+        background: rgba(255, 59, 48, 0.15);
+    }
+
+    .empty-state {
+        padding: 48px 20px;
+        text-align: center;
+        color: rgba(161, 161, 166, 0.6);
+    }
+
+    .empty-icon {
+        font-size: 32px;
+        margin-bottom: 8px;
+        opacity: 0.4;
+        filter: grayscale(1);
+    }
+
+    .empty-state p {
+        margin: 0;
+        font-size: 12px;
+        font-weight: 500;
+    }
+
+    .footer {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 12px;
+        border-top: 1px solid var(--color-border-subtle);
+        background: var(--color-bg);
+    }
+
+    .footer-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        color: var(--color-text-secondary);
+        border-radius: 6px;
+        transition: var(--transition-fast);
+    }
+
+    .footer-btn:hover {
+        color: var(--color-text-primary);
+        background: rgba(255, 255, 255, 0.08);
+    }
+
+    .footer-version {
+        font-size: 11px;
+        color: rgba(161, 161, 166, 0.4);
+    }
+</style>
