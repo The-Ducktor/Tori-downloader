@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Combine
 
 // DownloadManager handles the lifecycle of file downloads and plugin processing.
@@ -23,18 +24,19 @@ private enum SharedFormatters {
 }
 
 @MainActor
-class DownloadManager: NSObject, ObservableObject {
-    @Published var downloads: [DownloadItem] = []
+@Observable
+class DownloadManager: NSObject {
+    var downloads: [DownloadItem] = []
 
     // Batch update support
-    private var isBatchUpdating = false
-    private var needsNotify = false
+    @ObservationIgnored private var isBatchUpdating = false
+    @ObservationIgnored private var needsNotify = false
 
-    var onUpdate: (() -> Void)?
+    @ObservationIgnored var onUpdate: (() -> Void)?
 
     // Cached JSON for WebSocket broadcasts
-    private var cachedJSON: String?
-    private var jsonIsDirty = true
+    @ObservationIgnored private var cachedJSON: String?
+    @ObservationIgnored private var jsonIsDirty = true
 
     private func notifyUpdate() {
         jsonIsDirty = true
@@ -42,7 +44,6 @@ class DownloadManager: NSObject, ObservableObject {
             needsNotify = true
             return
         }
-        objectWillChange.send()
         onUpdate?()
     }
 
@@ -53,7 +54,6 @@ class DownloadManager: NSObject, ObservableObject {
         block()
         isBatchUpdating = false
         if needsNotify {
-            objectWillChange.send()
             onUpdate?()
         }
     }
@@ -71,7 +71,7 @@ class DownloadManager: NSObject, ObservableObject {
         }
     }
 
-    private var session: URLSession!
+    @ObservationIgnored private var session: URLSession!
     private let maxRetries = 3
     private let retryDelay: TimeInterval = 2.0
 
@@ -474,7 +474,8 @@ extension DownloadManager: URLSessionDownloadDelegate {
 }
 
 @MainActor
-class DownloadItem: ObservableObject, Identifiable {
+@Observable
+class DownloadItem: Identifiable {
     enum Status: String, Codable {
         case pending, processing, downloading, paused, completed, failed, canceled
     }
@@ -489,8 +490,7 @@ class DownloadItem: ObservableObject, Identifiable {
     var reprocessOnResume: Bool = false
     let dateAdded = Date()
 
-    // Use single @Published for batch efficiency
-    @Published private(set) var lastUpdate = Date()
+    private(set) var lastUpdate = Date()
 
     var status: Status = .pending { didSet { if status != oldValue { signalUpdate() } } }
     var progress: Double = 0
@@ -505,13 +505,13 @@ class DownloadItem: ObservableObject, Identifiable {
         lastUpdate = Date()
     }
 
-    var task: URLSessionDownloadTask?
-    var localURL: URL?
-    var resumeData: Data?
-    var retryCount = 0
+    @ObservationIgnored var task: URLSessionDownloadTask?
+    @ObservationIgnored var localURL: URL?
+    @ObservationIgnored var resumeData: Data?
+    @ObservationIgnored var retryCount = 0
 
-    var lastBytesWritten: Int64 = 0
-    var lastSpeedUpdateTime = Date()
+    @ObservationIgnored var lastBytesWritten: Int64 = 0
+    @ObservationIgnored var lastSpeedUpdateTime = Date()
 
     init(url: URL) {
         self.originalURL = url

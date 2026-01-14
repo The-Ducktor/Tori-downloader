@@ -6,7 +6,7 @@ import CryptoKit
 /// We mark the class as @unchecked Sendable because it is isolated to the MainActor, and all callbacks
 /// are explicitly jumped back to the MainActor using assumeIsolated.
 @MainActor
-final class ToriServer: ObservableObject, @unchecked Sendable {
+final class ToriServer: @unchecked Sendable {
     private var listener: NWListener?
     private let port: NWEndpoint.Port
     private let downloadManager: DownloadManager

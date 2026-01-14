@@ -1,7 +1,9 @@
 import SwiftUI
+import Observation
 
 @MainActor
-class AppModel: ObservableObject {
+@Observable
+class AppModel {
     let downloadManager: DownloadManager
     let server: ToriServer
 
@@ -9,7 +11,7 @@ class AppModel: ObservableObject {
         let manager = DownloadManager()
         self.downloadManager = manager
         self.server = ToriServer(downloadManager: manager)
-        
+
         // Start server immediately upon AppModel creation (which happens once at app launch)
         self.server.start()
     }
@@ -17,13 +19,13 @@ class AppModel: ObservableObject {
 
 @main
 struct ToriApp: App {
-    // StateObject ensures AppModel is created only once and persists for the app's lifetime
-    @StateObject private var appModel = AppModel()
+    // State ensures AppModel is created only once and persists for the app's lifetime
+    @State private var appModel = AppModel()
 
     var body: some Scene {
         Window("Tori", id: "main") {
             DownloadManagerView()
-                .environmentObject(appModel.downloadManager)
+                .environment(appModel.downloadManager)
                 .onOpenURL { url in
                     appModel.downloadManager.handleURL(url)
                 }
@@ -38,7 +40,7 @@ struct ToriApp: App {
 
         Window("Add Downloads", id: "add-download") {
             AddDownloadView()
-                .environmentObject(appModel.downloadManager)
+                .environment(appModel.downloadManager)
                 .frame(minWidth: 500, minHeight: 400)
         }
         .defaultSize(width: 500, height: 400)

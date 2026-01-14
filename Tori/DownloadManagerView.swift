@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct DownloadManagerView: View {
-    @EnvironmentObject private var manager: DownloadManager
+    @Environment(DownloadManager.self) private var manager
     @State private var isShowingAddDownloadSheet = false
     @State private var isShowingPluginsSheet = false
 
@@ -35,7 +35,7 @@ struct DownloadManagerView: View {
             }
             .sheet(isPresented: $isShowingAddDownloadSheet) {
                 AddDownloadView()
-                    .environmentObject(manager)
+                    .environment(manager)
             }
             .sheet(isPresented: $isShowingPluginsSheet) {
                 PluginsListView()
@@ -141,7 +141,7 @@ struct AddDownloadView: View {
         case selection([PluginActionResult])
     }
 
-    @EnvironmentObject private var manager: DownloadManager
+    @Environment(DownloadManager.self) private var manager
     @Environment(\.dismiss) private var dismiss
 
     @State private var urlInput = ""
@@ -485,7 +485,7 @@ struct AddDownloadView: View {
 // MARK: - DownloadRow
 
 struct DownloadRow: View {
-    @ObservedObject var item: DownloadItem
+    var item: DownloadItem
     let manager: DownloadManager
 
     var body: some View {
@@ -719,7 +719,7 @@ struct DownloadRow: View {
 // MARK: - PluginsListView
 
 struct PluginsListView: View {
-    @StateObject private var pluginManager = PluginManager.shared
+    @State private var pluginManager = PluginManager.shared
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -859,8 +859,8 @@ struct PluginsListView: View {
 // MARK: - Preview
 
 #Preview {
-    @Previewable @StateObject var manager = DownloadManager()
+    @Previewable @State var manager = DownloadManager()
 
     DownloadManagerView()
-        .environmentObject(manager)
+        .environment(manager)
 }

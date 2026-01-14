@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 @preconcurrency import JavaScriptCore
 
 struct PluginManifest: Codable, Sendable {
@@ -34,11 +35,12 @@ struct LoadedPlugin: Identifiable {
 }
 
 @MainActor
-class PluginManager: ObservableObject {
+@Observable
+class PluginManager {
     static let shared = PluginManager()
 
-    @Published var loadedPlugins: [LoadedPlugin] = []
-    private let context: JSContext
+    var loadedPlugins: [LoadedPlugin] = []
+    @ObservationIgnored private let context: JSContext
 
     var loadedPluginNames: [String] {
         loadedPlugins.map { $0.manifest.name }

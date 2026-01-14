@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct MenuBarExtraView: View {
-    @ObservedObject var manager: DownloadManager
+    var manager: DownloadManager
     @Environment(\.openWindow) private var openWindow
     @State private var showAllDownloads = false
 
@@ -144,8 +144,8 @@ struct MenuBarExtraView: View {
 }
 
 struct MenuBarDownloadRow: View {
-    @ObservedObject var item: DownloadItem
-    @ObservedObject var manager: DownloadManager
+    var item: DownloadItem
+    var manager: DownloadManager
     @State private var isHovered = false
 
     var body: some View {
